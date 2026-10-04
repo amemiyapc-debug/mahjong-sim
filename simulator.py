@@ -1218,18 +1218,20 @@ TABLE_LABEL = {"X": "(X)翻x1,000", "Y": "(Y)満貫制"}
 TENHOU_REAL_WIN_RATE = 0.22  # 参考: 実際の麻雀の和了率
 
 
-def simulate_stages(res, L, mult, N, table, runs, seed, policy=4, pile_pt=500, burst_at=4,
+def simulate_stages(res, L, mult, N, table, runs, seed, pile_pt=500, pile_max=5, tease_at=3, safety=30,
                     lives=3, cap=30, base=5000):
     """ステージ制のランを再現する(ゲームは独立なので、結果を再抽選する)。
     ライフ3(ステージを跨いで減る)。1ステージ = N消費ゲーム以内に目標点(base x mult^(k-1))を達成。
-    失敗(N消費しても未達 / 連続burst_at回目のテンパイ流局でバースト)でライフ-1、同じステージをやり直す。
-    積み点はステージが変わる/失敗でやり直すとリセット。ステージcapをクリアしたらそのランは終了。"""
+    アガリとノーテンが1ゲーム消費、テンパイ流局は消費しない(バーストなし・崩す選択肢なし)。
+    N消費しても未達ならライフ-1で同じステージをやり直す。ライフ0でゲームオーバー。ステージcapクリアで終了。
+    積み点 = 連続テンパイ1回ごとに pile_pt、連続pile_max回分まで。次のアガリで加算。アガリ・ノーテン・
+    ステージ変更(やり直し含む)でリセット。連続テンパイがtease_at回に達したら焦らしプレイ達成(記録のみ)。
+    連続テンパイがsafety回に達したら、強制的に1ゲーム消費(ノーテンと同じ扱い)。"""
     rng = np.random.default_rng(seed)
     pts = POINT_TABLES[table]
     kind = np.array([0 if r[0] == "win" else 1 if r[0] == "tenpai" else 2 for r in res])
     han = np.array([min(r[1], len(pts) - 1) if r[0] == "win" else 0 for r in res])
     draws = np.array([r[3] if r[0] == "win" else L for r in res], dtype=np.int64)
-    can_break = np.array([r[0] == "tenpai" and r[1] for r in res])
     G = len(res)
     R = runs
     targets = np.array([0.0] + [base * mult ** (k - 1) for k in range(1, cap + 2)])
@@ -1237,46 +1239,59 @@ def simulate_stages(res, L, mult, N, table, runs, seed, policy=4, pile_pt=500, b
     stage = np.ones(R, dtype=np.int64)
     life = np.full(R, lives, dtype=np.int64)
     sscore = np.zeros(R, dtype=np.float64)
-    pile = np.zeros(R, dtype=np.int64)
-    streak = np.zeros(R, dtype=np.int64)
+    streak = np.zeros(R, dtype=np.int64)   # 連続テンパイ数(積み点 = pile_pt x min(連続数, pile_max))
     used = np.zeros(R, dtype=np.int64)
     alive = np.ones(R, dtype=bool)
     total = np.zeros(R, dtype=np.int64)
     final_stage = np.ones(R, dtype=np.int64)
     capclear = np.zeros(R, dtype=bool)
+    tease_n = np.zeros(R, dtype=np.int64)  # 焦らしプレイ達成の回数(連続テンパイがtease_atに達した回数)
+    consumed = np.zeros(R, dtype=np.int64)
+    forced = 0
+    hist = np.zeros(safety + 1, dtype=np.int64)  # 消費ゲームの直前の連続テンパイ数の分布
     M = cap + 2
     reach = np.zeros(M, dtype=np.int64)
     attempts = np.zeros(M, dtype=np.int64)
     success = np.zeros(M, dtype=np.int64)
-    fail_n = np.zeros(M, dtype=np.int64)
-    fail_b = np.zeros(M, dtype=np.int64)
     dstage = np.zeros(M, dtype=np.int64)
+    win_n = np.zeros(M, dtype=np.int64)       # ステージごとのアガリ回数
+    win_ratio = np.zeros(M, dtype=np.float64)  # 積み点 / そのアガリの得点 の合計
+    win_pile = np.zeros(M, dtype=np.float64)
+    win_pts = np.zeros(M, dtype=np.float64)
     reach[1] = R
 
     while alive.any():
         act = alive
         gi = rng.integers(0, G, size=R)
-        k, h, dd, cb = kind[gi], han[gi], draws[gi], can_break[gi]
+        k, h, dd = kind[gi], han[gi], draws[gi]
         total[act] += dd[act]
         np.add.at(dstage, stage[act], dd[act])
         is_win = act & (k == 0)
         is_noten = act & (k == 2)
         is_tp = act & (k == 1)
-        if policy is not None:
-            broken = is_tp & cb & (streak + 1 >= policy)
-            is_noten = is_noten | broken
-            is_tp = is_tp & ~broken
-        sscore[is_win] += pts[h[is_win]] + pile[is_win]
-        reset = is_win | is_noten
-        pile[reset] = 0
-        streak[reset] = 0
-        used[reset] += 1
+        # 連続テンパイ: 焦らし達成と、安全装置(強制消費)
         streak[is_tp] += 1
-        pile[is_tp] += pile_pt
-        burst = is_tp & (streak >= burst_at)
-        cleared = act & ~burst & (sscore >= targets[stage])
-        exhausted = act & ~burst & ~cleared & (used >= N)
-        failed = burst | exhausted
+        tease_n[is_tp & (streak == tease_at)] += 1
+        force = is_tp & (streak >= safety)
+        forced += int(force.sum())
+        is_noten = is_noten | force
+        # アガリ: 得点 = 翻の点 + 積み点
+        pile = pile_pt * np.minimum(streak, pile_max)
+        gain = pts[h] + pile
+        wi = np.nonzero(is_win)[0]
+        if len(wi):
+            sscore[wi] += gain[wi]
+            win_n += np.bincount(stage[wi], minlength=M)
+            win_ratio += np.bincount(stage[wi], weights=pile[wi] / gain[wi], minlength=M)
+            win_pile += np.bincount(stage[wi], weights=pile[wi], minlength=M)
+            win_pts += np.bincount(stage[wi], weights=gain[wi], minlength=M)
+        spend = is_win | is_noten
+        np.add.at(hist, np.minimum(streak[spend], safety), 1)
+        streak[spend] = 0
+        used[spend] += 1
+        consumed[spend] += 1
+        cleared = act & (sscore >= targets[stage])
+        failed = act & ~cleared & (used >= N)
 
         ci = np.nonzero(cleared)[0]
         if len(ci):
@@ -1294,34 +1309,32 @@ def simulate_stages(res, L, mult, N, table, runs, seed, policy=4, pile_pt=500, b
         fi = np.nonzero(failed)[0]
         if len(fi):
             attempts += np.bincount(stage[fi], minlength=M)
-            fb = fi[burst[fi]]
-            fn = fi[~burst[fi]]
-            fail_b += np.bincount(stage[fb], minlength=M)
-            fail_n += np.bincount(stage[fn], minlength=M)
             life[fi] -= 1
             dead = fi[life[fi] <= 0]
             final_stage[dead] = stage[dead]
             alive[dead] = False
         back = np.nonzero(cleared | failed)[0]  # 新しいステージ/やり直しは、状態をリセット
         sscore[back] = 0
-        pile[back] = 0
         streak[back] = 0
         used[back] = 0
     return dict(final_stage=final_stage, capclear=capclear, total=total, reach=reach, attempts=attempts,
-                success=success, fail_n=fail_n, fail_b=fail_b, dstage=dstage, runs=R, cap=cap)
+                success=success, dstage=dstage, runs=R, cap=cap, tease_n=tease_n, consumed=consumed,
+                forced=forced, hist=hist, win_n=win_n, win_ratio=win_ratio, win_pile=win_pile, win_pts=win_pts)
 
 
 def stage_summary(o):
     fs = o["final_stage"]
     played = fs.mean()
-    fails = o["fail_n"].sum() + o["fail_b"].sum()
+    fails = o["attempts"].sum() - o["success"].sum()
+    cons = o["consumed"].sum()
     return dict(
         mean=float(fs.mean()), median=float(np.median(fs)), p90=float(np.percentile(fs, 90)),
         cap_rate=float(o["capclear"].mean()), total_draws=float(o["total"].mean()),
-        draws_per_stage=float(o["total"].mean() / played),
-        life_n=float(o["fail_n"].sum() / fails) if fails else 0.0,
-        life_burst=float(o["fail_b"].sum() / fails) if fails else 0.0,
-        lives_lost=float(fails / o["runs"]),
+        draws_per_stage=float(o["total"].mean() / played), lives_lost=float(fails / o["runs"]),
+        tease_per_game=float(o["tease_n"].sum() / cons) if cons else 0.0,
+        tease_run_rate=float((o["tease_n"] > 0).mean()), tease_per_run=float(o["tease_n"].mean()),
+        forced=int(o["forced"]), games_per_run=float(cons / o["runs"]),
+        pile_ratio=float(o["win_ratio"].sum() / max(o["win_n"].sum(), 1)),
     )
 
 
@@ -1336,7 +1349,21 @@ def v14_part1(args, heads_range, outdir, enum):
         print(f"  4語の組(全{tot:,}通り)のうち、この山の牌の枚数で作れる組: {n:,}通り" + ("(全部作れる)" if n == tot else ""))
         print()
     print(f"ゲームのシミュレーション(アガリ率の95%誤差幅が目標以下になるまで。L={','.join(map(str, limits))}。強弱CPUは同じ配牌・同じ山)...", flush=True)
-    raw = collect(args, heads_range, rules, limits, kinds=("win",), trace=True)
+    key = (args.seed, args.ci, args.min_games, args.max_games, args.batch, args.games, args.pool_size, limits, rules, args.heads)
+    raw = None
+    if args.cache and os.path.exists(args.cache):
+        import pickle
+        with open(args.cache, "rb") as f:
+            saved = pickle.load(f)
+        if saved["key"] == key:
+            raw = saved["raw"]
+            print(f"  (キャッシュ {args.cache} を使用: {len(raw)}ゲーム。同じ設定で計算済み)")
+    if raw is None:
+        raw = collect(args, heads_range, rules, limits, kinds=("win",), trace=True)
+        if args.cache:
+            import pickle
+            with open(args.cache, "wb") as f:
+                pickle.dump(dict(key=key, raw=raw), f)
     G = len(raw)
     print(f"  → {G}ゲーム(各条件・各CPU)")
     sums, curves = {}, {}
@@ -1415,10 +1442,12 @@ def v14_part2(args, raw, outdir):
     mults = [float(x) for x in args.mults.split(",")]
     Ns = [int(x) for x in args.stage_ns.split(",")]
     runs = args.stage_runs
-    print("\n" + "=" * 10 + f" パート2: ステージ制(L={L}・枚数ルール(a)・4回目のテンパイを崩す・{runs}ラン/条件) " + "=" * 10)
+    cap = args.stage_cap
+    print("\n" + "=" * 10 + f" パート2: ステージ制(L={L}・枚数ルール(a)・{runs}ラン/条件) " + "=" * 10)
     print("  ルール: ライフ3(ステージを跨いで減る)。1ステージ = N消費ゲーム以内に目標点を達成。アガリとノーテンが1ゲーム消費、テンパイ流局は消費しない。")
-    print(f"  達成で次のステージへ。失敗(N消費しても未達 / 連続{args.burst_at}回目のテンパイ流局でバースト)でライフ-1、同じステージをやり直す。ライフ0でゲームオーバー。")
-    print(f"  積み点: 連続テンパイ1回ごとに{args.pile_point}点、次のアガリで加算、ノーテンで消える。ステージが変わる/やり直すとリセット。ステージ上限{args.stage_cap}。")
+    print("  達成で次のステージへ。N消費しても未達ならライフ-1で、同じステージをやり直す。ライフ0でゲームオーバー。バーストなし・テンパイを崩す選択肢なし。")
+    print(f"  焦らしプレイ: 連続テンパイが3回に達したら達成として記録(ペナルティなし、4回目以降も続行)。内部の安全装置: 連続テンパイ30回で強制的に1ゲーム消費(ノーテンと同じ扱い)。")
+    print(f"  積み点: 連続テンパイ1回ごとに{args.pile_point}点を積む(連続5回分=最大{args.pile_point * 5}点まで)。次のアガリで加算。アガリ・ノーテン・ステージ変更(やり直し含む)でリセット。ステージ上限{cap}。")
     print("  目標点 = 5,000 x 倍率^(k-1)。到達ステージ = ゲームオーバー(上限クリアは上限)になった時点のステージ番号。")
     print("  満貫制(Y): 1〜4翻=翻x1,000 / 5翻=8,000 / 6〜7翻=12,000 / 8〜10翻=16,000 / 11〜12翻=24,000 / 13翻以上=32,000")
 
@@ -1437,40 +1466,59 @@ def v14_part2(args, raw, outdir):
         print(f"  {CPU_LABEL[cpu]}(アガリ{n}回): 1翻 {line['h1']:.1%} / 2翻 {line['h2']:.1%} / 3翻 {line['h3']:.1%} / 4翻 {line['h4']:.1%} / "
               f"5翻 {line['h5']:.1%} / 6〜7翻 {line['h6_7']:.1%} / 8〜10翻 {line['h8_10']:.1%} / 11〜12翻 {line['h11_12']:.1%} / 13翻以上 {line['h13p']:.1%}")
         print(f"      5翻以上 {line['ge5']:.1%} / 満貫以上(X: 8翻以上) {line['mangan_X']:.1%} / 満貫以上(Y: 5翻以上) {line['mangan_Y']:.1%} / "
-              f"1アガリの平均点 X {line['avg_pts_X']:.0f} → Y {line['avg_pts_Y']:.0f}")
+              f"1アガリの平均点(積み点なし) X {line['avg_pts_X']:.0f} → Y {line['avg_pts_Y']:.0f}")
     write_csv(os.path.join(outdir, "part2_han.csv"), han_rows)
 
+    kw = dict(pile_pt=args.pile_point, cap=cap)
     srows, prows, results = [], [], {}
     for ci, cpu in enumerate(CPUS):
         for table in ("X", "Y"):
             for mult in mults:
                 for N in Ns:
-                    o = simulate_stages([g[ci] for g in games], L, mult, N, table, runs, args.seed + ci,
-                                        pile_pt=args.pile_point, burst_at=args.burst_at, cap=args.stage_cap)
+                    o = simulate_stages([g[ci] for g in games], L, mult, N, table, runs, args.seed + ci, **kw)
                     sm = stage_summary(o)
                     results[(cpu, table, mult, N)] = (o, sm)
                     srows.append(dict(cpu=cpu, table=table, mult=mult, N=N, runs=runs, **sm))
-                    for k in range(1, args.stage_cap + 1):
+                    for k in range(1, cap + 1):
                         if o["reach"][k]:
+                            wn = o["win_n"][k]
                             prows.append(dict(cpu=cpu, table=table, mult=mult, N=N, stage=k, target=5000 * mult ** (k - 1),
                                               reach=int(o["reach"][k]), attempts=int(o["attempts"][k]), cleared=int(o["success"][k]),
                                               pass_rate=o["success"][k] / o["reach"][k],
                                               attempt_success_rate=o["success"][k] / o["attempts"][k] if o["attempts"][k] else 0.0,
-                                              fail_N=int(o["fail_n"][k]), fail_burst=int(o["fail_b"][k]),
-                                              mean_draws=o["dstage"][k] / o["reach"][k]))
+                                              mean_draws=o["dstage"][k] / o["reach"][k], wins=int(wn),
+                                              mean_pile=o["win_pile"][k] / wn if wn else 0.0,
+                                              pile_ratio_per_win=o["win_ratio"][k] / wn if wn else 0.0,
+                                              pile_share_of_points=o["win_pile"][k] / o["win_pts"][k] if wn else 0.0))
     write_csv(os.path.join(outdir, "part2_summary.csv"), srows)
     write_csv(os.path.join(outdir, "part2_stage_pass.csv"), prows)
 
     for ci, cpu in enumerate(CPUS):
-        print(f"\n[{CPU_LABEL[cpu]}] 到達ステージ(平均/中央値/上位10%)、上限クリア率、総ツモ数、ライフ減少の内訳")
-        print(f"  {'点の表':<10}{'倍率':>5}{'N':>3} |{'平均':>6}{'中央':>5}{'上位10%':>7}{'上限':>7} |{'総ツモ/挑戦':>10}{'ツモ/ステージ':>12} |{'失敗回数':>8}{'N消費':>7}{'バースト':>8}")
+        print(f"\n[{CPU_LABEL[cpu]}] 到達ステージ(平均/中央値/上位10%)、上限クリア率、総ツモ数、焦らしプレイ")
+        print(f"  {'点の表':<10}{'倍率':>5}{'N':>3} |{'平均':>6}{'中央':>5}{'上位10%':>7}{'上限':>7} |{'総ツモ/挑戦':>10}{'ツモ/ステージ':>12} |{'失敗':>6} |{'焦らし/ゲーム':>11}{'/挑戦':>8}{'回数/挑戦':>9}")
         for table in ("X", "Y"):
             for mult in mults:
                 for N in Ns:
                     sm = results[(cpu, table, mult, N)][1]
                     print(f"  {TABLE_LABEL[table]:<10}{mult:>5}{N:>3} |{sm['mean']:>6.1f}{sm['median']:>5.0f}{sm['p90']:>7.0f}{sm['cap_rate']:>7.1%} |"
-                          f"{sm['total_draws']:>10.0f}{sm['draws_per_stage']:>12.1f} |{sm['lives_lost']:>8.2f}{sm['life_n']:>7.1%}{sm['life_burst']:>8.1%}")
-    print("  (失敗回数 = 1挑戦あたりのライフ減少回数。N消費/バースト = ライフ減少の原因の内訳)")
+                          f"{sm['total_draws']:>10.0f}{sm['draws_per_stage']:>12.1f} |{sm['lives_lost']:>6.2f} |"
+                          f"{sm['tease_per_game']:>11.1%}{sm['tease_run_rate']:>8.1%}{sm['tease_per_run']:>9.2f}")
+    print("  (失敗 = 1挑戦あたりのライフ減少回数。焦らし/ゲーム = 焦らし達成数 ÷ 消費ゲーム数 / 焦らし/挑戦 = 1回以上達成した挑戦の割合 / 回数/挑戦 = 1挑戦あたりの平均達成回数)")
+
+    print("\n[連続テンパイ回数の分布] 消費ゲーム(アガリ・ノーテン・強制消費)の直前に続いていた連続テンパイの回数。全条件を合算")
+    hist_rows = []
+    for ci, cpu in enumerate(CPUS):
+        hist = sum(results[(cpu, t, m, n)][0]["hist"] for t in ("X", "Y") for m in mults for n in Ns)
+        tot = hist.sum()
+        forced = sum(results[(cpu, t, m, n)][0]["forced"] for t in ("X", "Y") for m in mults for n in Ns)
+        groups = [("0回", 0, 0), ("1回", 1, 1), ("2回", 2, 2), ("3回", 3, 3), ("4回", 4, 4), ("5回", 5, 5),
+                  ("6〜9回", 6, 9), ("10〜29回", 10, 29)]
+        line = " / ".join(f"{nm} {hist[lo:hi + 1].sum() / tot:.2%}" for nm, lo, hi in groups) + f" / 30回(強制消費) {forced / tot:.4%}"
+        print(f"  {CPU_LABEL[cpu]}: {line}")
+        print(f"      3回以上(焦らし) {hist[3:].sum() / tot:.2%} / 強制消費の発生 {forced}回({tot:,}ゲーム中)")
+        for n_ in range(len(hist)):
+            hist_rows.append(dict(cpu=cpu, streak=n_, games=int(hist[n_]), share=hist[n_] / tot))
+    write_csv(os.path.join(outdir, "part2_streak_hist.csv"), hist_rows)
 
     print("\n[条件の抽出] 強CPUの平均到達ステージが5〜8、かつ挑戦全体の総ツモ数が300〜500回")
     hit = [(k, v[1]) for k, v in results.items() if k[0] == "strong" and 5 <= v[1]["mean"] <= 8 and 300 <= v[1]["total_draws"] <= 500]
@@ -1484,16 +1532,6 @@ def v14_part2(args, raw, outdir):
         for k, sm in sorted(cand, key=lambda t: (max(0, 5 - t[1]["mean"], t[1]["mean"] - 8) * 100 + max(0, 300 - t[1]["total_draws"], t[1]["total_draws"] - 500)))[:5]:
             print(f"  {TABLE_LABEL[k[1]]} 倍率{k[2]} N={k[3]}: 強CPU 平均{sm['mean']:.1f}・総ツモ{sm['total_draws']:.0f}")
 
-    print("\n[ステージごとの突破率(強CPU。ステージ1〜12。そのステージに到達したランのうち、ライフ内に突破した割合)]")
-    print(f"  {'条件':<24}" + "".join(f"{k:>6}" for k in range(1, 13)))
-    for table in ("X", "Y"):
-        for mult in mults:
-            for N in Ns:
-                o = results[("strong", table, mult, N)][0]
-                cells = "".join(f"{o['success'][k] / o['reach'][k]:>6.0%}" if o["reach"][k] else f"{'-':>6}" for k in range(1, 13))
-                print(f"  {TABLE_LABEL[table]} x{mult} N={N:<3}{cells}")
-    print("  全ステージ・弱CPU・1回あたりの成功率・ステージ別の平均ツモ数は part2_stage_pass.csv")
-
     # 仕様外の追加探索: 初期目標・倍率を振って、強CPUの平均到達ステージ5〜8・総ツモ300〜500になる条件を探す
     ex_bases = [int(x) for x in args.extra_bases.split(",") if x]
     ex_mults = [float(x) for x in args.extra_mults.split(",") if x]
@@ -1506,8 +1544,7 @@ def v14_part2(args, raw, outdir):
                     for N in Ns:
                         sm = {}
                         for ci, cpu in enumerate(CPUS):
-                            o = simulate_stages([g[ci] for g in games], L, mult, N, table, runs, args.seed + ci,
-                                                pile_pt=args.pile_point, burst_at=args.burst_at, cap=args.stage_cap, base=base)
+                            o = simulate_stages([g[ci] for g in games], L, mult, N, table, runs, args.seed + ci, base=base, **kw)
                             sm[cpu] = stage_summary(o)
                             erows.append(dict(cpu=cpu, table=table, base=base, mult=mult, N=N, runs=runs, **sm[cpu]))
                         st_ = sm["strong"]
@@ -1521,6 +1558,26 @@ def v14_part2(args, raw, outdir):
         else:
             print("  該当なし")
         print(f"  追加探索の全結果: part2_extra_summary.csv ({len(erows)}行)")
+
+    print("\n[ステージごとの突破率(強CPU。ステージ1〜12。そのステージに到達したランのうち、ライフ内に突破した割合)]")
+    print(f"  {'条件':<24}" + "".join(f"{k:>6}" for k in range(1, 13)))
+    for table in ("X", "Y"):
+        for mult in mults:
+            for N in Ns:
+                o = results[("strong", table, mult, N)][0]
+                cells = "".join(f"{o['success'][k] / o['reach'][k]:>6.0%}" if o["reach"][k] else f"{'-':>6}" for k in range(1, 13))
+                print(f"  {TABLE_LABEL[table]} x{mult} N={N:<3}{cells}")
+    print("  全ステージ・弱CPU・1回あたりの成功率・ステージ別の平均ツモ数は part2_stage_pass.csv")
+
+    print("\n[参考: 積み点がアガリ1回の得点に占める平均割合(強CPU。ステージ1〜12。アガリごとの 積み点÷得点 の平均)]")
+    print(f"  {'条件':<24}" + "".join(f"{k:>6}" for k in range(1, 13)) + f"{'全体':>7}")
+    for table in ("X", "Y"):
+        for mult in mults:
+            for N in Ns:
+                o, sm = results[("strong", table, mult, N)]
+                cells = "".join(f"{o['win_ratio'][k] / o['win_n'][k]:>6.1%}" if o["win_n"][k] else f"{'-':>6}" for k in range(1, 13))
+                print(f"  {TABLE_LABEL[table]} x{mult} N={N:<3}{cells}{sm['pile_ratio']:>7.1%}")
+    print("  弱CPU・全ステージ・平均の積み点・得点全体に占める積み点の割合は part2_stage_pass.csv (pile_ratio_per_win / mean_pile / pile_share_of_points)")
 
     print("\n[満貫制(Y)と翻x1,000(X)の比較(同じ倍率・N)] 平均到達ステージ X→Y / 総ツモ数 X→Y")
     for ci, cpu in enumerate(CPUS):
@@ -1588,6 +1645,7 @@ def main():
     ap.add_argument("--limits", default="6,8,10,12,14", help="--compare: ツモ上限Lの一覧")
     ap.add_argument("--v14", action="store_true", help="v1.4: 枚数ルール(a/b/c) x L=11,12,13 (パート1) と ステージ制(パート2)。results_v1.4/に保存")
     ap.add_argument("--out-v14", default=os.path.join(HERE, "results_v1.4"))
+    ap.add_argument("--cache", default="", help="--v14: パート1のゲーム結果のキャッシュ(pickle)。同じ設定ならパート2だけ再実行できる")
     ap.add_argument("--pot-games", type=int, default=20000, help="--v14: 枚数を反映した組み合わせ割合に使う、山から引く局数")
     ap.add_argument("--stage-limit", type=int, default=12, help="--v14 パート2: 基準のツモ上限L")
     ap.add_argument("--mults", default="1.3,1.5,1.8", help="--v14 パート2: 目標点の倍率")
