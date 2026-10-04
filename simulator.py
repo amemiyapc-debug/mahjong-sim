@@ -870,37 +870,72 @@ def yaku_rows(s, enum):
     return rows
 
 
+TENHOU_TARGETS = ((0.3, 0.05), (0.6, 0.28))  # 0.3L巡目で約5%、0.6L巡目で約28%(天鳳のテンパイ率を、17巡=L換算)
+
+
+def curve_arrays(raw, wall, cpu, tmax):
+    """巡目0〜tmaxごとの累積アガリ率・累積テンパイ率(アガリ含む)・その巡目にアガった割合。"""
+    wt = np.array([g[(wall, cpu, "trace")][0] for g in raw])
+    mk = np.array([g[(wall, cpu, "trace")][1] for g in raw], dtype=np.int64)
+    won = wt >= 0
+    cw, ct, at = [], [], []
+    for t in range(tmax + 1):
+        w_by = won & (wt <= t)
+        cw.append(float(w_by.mean()))
+        ct.append(float((w_by | ((mk >> t) & 1 == 1)).mean()))
+        at.append(float((won & (wt == t)).mean()))
+    mean_turn = float(wt[won].mean()) if won.any() else float("nan")
+    return np.array(cw), np.array(ct), np.array(at), mean_turn
+
+
+def interp(arr, x):
+    lo = int(math.floor(x))
+    if lo >= len(arr) - 1:
+        return float(arr[-1])
+    f = x - lo
+    return float(arr[lo] * (1 - f) + arr[lo + 1] * f)
+
+
+def first_turn(cw, p):
+    for t in range(1, len(cw)):
+        if cw[t] >= p:
+            return t
+    return None
+
+
+def compact_list(items, indent="    ", width=96):
+    import textwrap
+    return textwrap.fill(", ".join(items), width=width, initial_indent=indent, subsequent_indent=indent)
+
+
 def print_condition_detail(cname, ci, s, enum, outdir):
     d = data()
     cpu = CPUS[ci]
     w, n = s["win"], s["n"]
     print(f"\n--- {cname} / {CPU_LABEL[cpu]}  (アガリ {w}回 / {n}ゲーム) ---")
     hist = s["han_hist"]
-    print("  [翻の分布](アガリ時): " + "  ".join(f"{h}翻 {hist[h] / w:.1%}" for h in sorted(hist) if hist[h] / w >= 0.005))
-
+    if w:
+        print("  [翻の分布](アガリ時): " + "  ".join(f"{h}翻 {hist[h] / w:.1%}" for h in sorted(hist) if hist[h] / w >= 0.005))
     yrows = yaku_rows(s, enum)
     write_csv(os.path.join(outdir, f"{cname}_{cpu}_yaku.csv"), yrows)
-    print(f"  [役ごとのアガリ手での出現率](分母=アガリ手{w}回。上位12。全84役はCSV)")
-    for r in sorted(yrows, key=lambda r: -r["hits"])[:12]:
+    print(f"  [役ごとのアガリ手での出現率](分母=アガリ手{w}回。上位8。全84役はCSV)")
+    for r in sorted(yrows, key=lambda r: -r["hits"])[:8]:
         print(f"    {r['id']} {r['name']:<10}翻{r['han']} {r['share_of_wins']:>7.2%} ({r['hits']}回)")
     zero = [r for r in yrows if r["hits"] == 0]
-    bound = f"; アガリ{w}回中0回 = 真の出現率は95%の確信で{3 / w:.3%}以下" if w else ""
+    bound = f"; アガリ{w}回中0回 = 真の出現率は95%の確信で{3 / w:.2%}以下" if w else ""
     print(f"  [一度も出なかった役] {len(zero)}/{len(yrows)}{bound}")
-    print("    (カッコ内 = 4語の組み合わせとしての割合。595,665通りの数え上げ)")
-    for r in zero:
-        tail = "※成立する組み合わせが0" if r["combo_sets"] == 0 else f"{r['combo_rate']:.4%}({r['combo_sets']:,}通り)"
-        print(f"    {r['id']} {r['name']}(翻{r['han']}・{r['status']}): {tail}")
-
+    print("    表記: ID 役名(4語の組み合わせとしての割合。595,665通りの数え上げ。※は成立する組み合わせが0)")
+    print(compact_list([f"{r['id']} {r['name']}({'※' if r['combo_sets'] == 0 else format(r['combo_rate'], '.3%')})" for r in zero]))
     wrows = word_rows(s)
     write_csv(os.path.join(outdir, f"{cname}_{cpu}_words.csv"), wrows)
     ranked = sorted(wrows, key=lambda r: -r["hits"])
     fmt = lambda r: f"{r['word']} {r['share_of_wins']:.1%}"
-    print(f"  [語ごとの出現率](分母=アガリ手。4語/63語=平均{N_WORDS / d.nw:.1%})")
+    print(f"  [語ごとの出現率](分母=アガリ手。平均は4語/63語={N_WORDS / d.nw:.1%})")
     print("    上位8: " + " / ".join(fmt(r) for r in ranked[:8]))
     print("    下位8: " + " / ".join(fmt(r) for r in ranked[-8:]))
     ded = set(dedicated_words())
-    drows = [r for i, r in enumerate(wrows) if i in ded]
-    print("    専用牌を使う語: " + " / ".join(fmt(r) for r in sorted(drows, key=lambda r: -r["hits"])))
+    drows = sorted((r for i, r in enumerate(wrows) if i in ded), key=lambda r: -r["hits"])
+    print("    専用牌を使う語: " + " / ".join(fmt(r) for r in drows))
     pon = next(r for r in wrows if r["word"] == "ちんぽ")
     print(f"    ちんぽ: アガリ手の{pon['share_of_wins']:.2%}({pon['hits']}回) / 全ゲームの{pon['per_game']:.3%} / 平均の{pon['ratio_vs_mean']:.2f}倍")
 
@@ -913,9 +948,14 @@ def compare_main(args):
     sys.stdout = Tee(sys.__stdout__, report)
     t0 = time.time()
     d = data()
-    print("ひらがな麻雀(仮) v1.3 比較: 山の作り(A/B) x ツモ回数(10/14) x CPU(強/弱) x 崩し方")
+    limits = tuple(int(x) for x in args.limits.split(","))
+    tmax = args.curve_max
+    checkpoints = tuple(sorted(set(limits) | {tmax}))
+    walls = ("A", "B")
+    print("ひらがな麻雀(仮) v1.3 比較: 山の作り(A/B) x ツモ上限 x CPU(強/弱) x 崩し方")
     print(f"  A = 14語プール(喘ぎ牌{heads_range[0]}〜{heads_range[1]}種x各1枚) / B = 全語入り固定の山。語{d.nw}・役{len(d.yaku)}行。")
-    print(f"  乱数シード固定(seed={args.seed})。ゲーム{args.seed * 1_000_003}番〜の連番。同じ番号のゲームでは、A同士・B同士のツモ10回/14回は同じ配牌・同じ山。")
+    print(f"  ツモ上限 L = {','.join(map(str, limits))}。巡目カーブはツモ{tmax}回まで。乱数シード固定(seed={args.seed}、ゲーム番号 {args.seed * 1_000_003}〜の連番)。")
+    print("  捨て方は残りツモ回数を見ないので、同じ番号のゲームでは、どのLでも同じ配牌・同じ山・同じ捨て方(途中経過が共通)。")
     print()
     print_fixed_wall()
     print("\n役の数え上げ(4語の全組み合わせ)...", flush=True)
@@ -923,69 +963,119 @@ def compare_main(args):
     validate_pruned(args, heads_range, args.validate_games)
 
     print("\nゲームのシミュレーション(アガリ率の95%誤差幅が目標以下になるまで)...", flush=True)
-    raw = collect(args, heads_range, ("A", "B"), (10, 14), kinds=("win",))
+    raw = collect(args, heads_range, walls, checkpoints, kinds=("win",), trace=True)
     G = len(raw)
-    conds = [(w, cp) for w in ("A", "B") for cp in (10, 14)]
-    views = {c: view(raw, *c) for c in conds}
-    sums = {(c, ci): summarize(views[c], ci) for c in conds for ci in range(len(CPUS))}
     print(f"  → {G}ゲーム(各条件・各CPU)。経過 {time.time() - t0:.0f}秒")
 
-    # ---- 1. 4条件の比較表
-    print(f"\n=== 1. 4条件の比較(1ゲーム。{G}ゲーム、95%誤差幅つき) ===")
+    # ================= パート1: 巡目カーブ =================
+    series = [(w, cpu) for w in walls for cpu in CPUS]
+    sname = lambda s: f"{s[0]}{'強' if s[1] == 'strong' else '弱'}"
+    curves = {s: curve_arrays(raw, s[0], s[1], tmax) for s in series}
+    print(f"\n{'=' * 10} パート1: ゲーム単位の速度(巡目カーブ。ツモ{tmax}回まで、{G}ゲーム) {'=' * 10}")
+    print("  累積アガリ率 = その巡目までにアガった割合 / 累積テンパイ率 = その巡目の捨て牌の後で13枚がテンパイ以上(アガリ含む)の割合")
+    print(f"\n  {'巡目':>4} |" + "".join(f"{sname(s):>7}" for s in series) + " |" + "".join(f"{sname(s):>7}" for s in series))
+    print(f"  {'':>4} | {'--- 累積テンパイ率 ---':<28} | {'--- 累積アガリ率 ---'}")
+    for t in range(1, tmax + 1):
+        print(f"  {t:>4} |" + "".join(f"{curves[s][1][t]:>7.1%}" for s in series) + " |" + "".join(f"{curves[s][0][t]:>7.1%}" for s in series))
+    print("\n  [アガリ巡目] 平均アガリ巡目(アガリ全体、ツモ20回以内)と、その巡目にアガった割合(全ゲーム中)")
+    print(f"  {'巡目':>4} |" + "".join(f"{sname(s):>7}" for s in series))
+    for t in range(0, tmax + 1):
+        print(f"  {t:>4} |" + "".join(f"{curves[s][2][t]:>7.1%}" for s in series))
+    print(f"  {'平均':>4} |" + "".join(f"{curves[s][3]:>7.2f}" for s in series))
+    print("\n  [累積アガリ率が30%・50%・70%に達する巡目](ツモ20回以内に届かなければ「>20」)")
+    print(f"  {'':>8}|" + "".join(f"{sname(s):>7}" for s in series))
+    for p in (0.3, 0.5, 0.7):
+        cells = []
+        for s in series:
+            ft = first_turn(curves[s][0], p)
+            cells.append(f"{ft if ft else '>' + str(tmax):>7}")
+        print(f"  {int(p * 100):>6}% |" + "".join(cells))
+    print("\n  [天鳳との比較] 天鳳の累積テンパイ率(5巡5%・6巡9%・7巡13%・10巡28%)を、ゲーム巡数Lに換算: 0.3L巡目で約5%、0.6L巡目で約28%が目標")
+    print("  巡目が整数にならないときは、前後の巡目の線形補間。()は目標との差(pt)。")
+    tenhou_rows = []
+    for frac, target in TENHOU_TARGETS:
+        print(f"\n  {frac}L 巡目の累積テンパイ率(目標 約{target:.0%})")
+        print(f"  {'L':>3} {'巡目':>5} |" + "".join(f"{sname(s):>14}" for s in series))
+        for L in limits:
+            x = frac * L
+            vals = [interp(curves[s][1], x) for s in series]
+            print(f"  {L:>3} {x:>5.1f} |" + "".join(f"{v:>7.1%}({(v - target) * 100:+5.1f})" for v in vals))
+            for s, v in zip(series, vals):
+                tenhou_rows.append(dict(L=L, factor=frac, turn=x, series=sname(s), tenpai_rate=v, target=target, diff_pt=(v - target) * 100))
+    curve_rows = [dict(wall=s[0], cpu=s[1], turn=t, cum_win=curves[s][0][t], cum_tenpai=curves[s][1][t], win_at_turn=curves[s][2][t])
+                  for s in series for t in range(tmax + 1)]
+    write_csv(os.path.join(outdir, "curves.csv"), curve_rows)
+    write_csv(os.path.join(outdir, "tenhou_compare.csv"), tenhou_rows)
+
+    # ================= パート2: 1ラン =================
+    conds = [(w, L) for w in walls for L in limits]
+    views = {c: view(raw, *c) for c in conds}
+    sums = {(c, ci): summarize(views[c], ci) for c in conds for ci in range(len(CPUS))}
+    cn = lambda c: f"{c[0]}・ツモ{c[1]:>2}"
+
+    def avg_draws(c, ci):
+        res = [v[ci] for v in views[c]]
+        return sum(r[3] if r[0] == "win" else c[1] for r in res) / len(res)
+
+    print(f"\n{'=' * 10} パート2: 1ラン(ツモ上限 L = {','.join(map(str, limits))}) {'=' * 10}")
+    print(f"\n[1ゲーム({G}ゲーム。95%誤差幅つき)]")
     for ci, cpu in enumerate(CPUS):
-        print(f"\n[{CPU_LABEL[cpu]}]")
-        print(f"  {'条件':<22}{'アガリ率':>11}{'テンパイ流局':>12}{'ノーテン':>9}{'平均翻':>7}{'平均巡目':>8}{'崩せる割合':>10}")
+        print(f"\n  {CPU_LABEL[cpu]}")
+        print(f"  {'条件':<12}{'アガリ率':>11}{'テンパイ流局':>12}{'ノーテン':>9}{'平均翻':>7}{'平均アガリ巡目':>13}{'平均ツモ/ゲーム':>14}{'崩せる割合':>10}")
         for c in conds:
             s = sums[(c, ci)]
-            cn = f"{COND_NAME[c[0]]}・ツモ{c[1]}"
-            print(f"  {cn:<22}{s['win'] / G:>8.1%}±{ci_halfwidth(s['win'], G) * 100:.1f}{s['tenpai'] / G:>10.1%}{s['noten'] / G:>11.1%}"
-                  f"{s['avg_han']:>8.2f}{s['avg_turn']:>8.2f}{pct(s['break_ok'], s['tenpai']):>10}")
-    print("  (崩せる割合 = テンパイ流局のうち、テンパイにならない捨て牌が存在した割合)")
-    for cp in (10, 14):
-        for w_ in ("A", "B"):
-            diff = np.array([(g[0][0] == "win") - (g[1][0] == "win") for g in views[(w_, cp)]], dtype=float)
-            print(f"  強-弱のアガリ率差 {w_}・ツモ{cp}: {diff.mean() * 100:+.1f}pt ±{1.96 * diff.std(ddof=1) / math.sqrt(G) * 100:.1f}")
+            print(f"  {cn(c):<12}{s['win'] / G:>8.1%}±{ci_halfwidth(s['win'], G) * 100:.1f}{s['tenpai'] / G:>10.1%}{s['noten'] / G:>11.1%}"
+                  f"{s['avg_han']:>8.2f}{s['avg_turn']:>13.2f}{avg_draws(c, ci):>14.2f}{pct(s['break_ok'], s['tenpai']):>10}")
+    print("  (平均ツモ/ゲーム = アガリはアガリ巡目、それ以外は上限Lまで引く。崩せる割合 = テンパイ流局のうち、テンパイにならない捨て牌が存在した割合)")
+    print("\n[翻の分布(アガリ時)]")
+    for ci, cpu in enumerate(CPUS):
+        for c in conds:
+            s = sums[(c, ci)]
+            h = s["han_hist"]
+            if s["win"]:
+                print(f"  {CPU_LABEL[cpu]} {cn(c):<10}" + " ".join(f"{k}翻{h[k] / s['win']:>6.1%}" for k in sorted(h) if h[k] / s["win"] >= 0.005))
 
-    # ---- 2. 1ラン(N=5)
     targets = [int(x) for x in args.targets.split(",")]
     N = int(args.run_n)
-    print(f"\n=== 2. 1ラン(N={N}、積み点{args.pile_point}点/回、連続{args.burst_at}回目のテンパイ流局でバースト、{args.runs}ラン) ===")
-    print("  クリア率 / バースト率 / 焦らしプレイ(連続テンパイ3回)到達率。バースト・焦らしは、クリアまたはN消費の前に起きた割合。")
-    run_rows = []
-    runs = {}
+    print(f"\n[1ラン(N={N}、積み点{args.pile_point}点/回、連続{args.burst_at}回目のテンパイ流局でバースト、{args.runs}ラン)]")
+    print("  クリア率 / バースト率 / 焦らし(連続テンパイ3回)到達率 / 1ランあたりの総ツモ数(平均。クリア・バースト・N消費のどれかで終わるまで。テンパイ流局のやり直し分も含む)")
+    print("  崩す方針(4回目を崩す)では、バーストは0%、焦らし到達率は「崩せない」と同じ。クリア率と総ツモ数だけ違う。")
+    run_rows, runs = [], {}
     for ci, cpu in enumerate(CPUS):
         for pol in POLICIES:
             for c in conds:
-                runs[(c, ci, pol)] = simulate_runs(views[c], ci, [N], targets, pol, args.pile_point, args.burst_at, args.runs, args.seed + ci)
+                runs[(c, ci, pol)] = simulate_runs(views[c], ci, [N], targets, pol, args.pile_point, args.burst_at, args.runs, args.seed + ci, limit=c[1])
                 for T in targets:
-                    cl, bu, r3 = runs[(c, ci, pol)][(N, T)]
-                    run_rows.append(dict(condition=cond_id(*c), cpu=cpu, policy="none" if pol is None else f"break@{pol}",
-                                         target=T, clear=cl, burst=bu, tease3=r3))
-            print(f"\n[{CPU_LABEL[cpu]} / {POLICY_LABEL[pol]}]")
-            for title, j in (("クリア率", 0), ("バースト率", 1), ("焦らし到達率", 2)):
-                print(f"  {title:<8}{'目標点':>8} |" + "".join(f"{T:>8}" for T in targets))
+                    cl, bu, r3, dr_ = runs[(c, ci, pol)][(N, T)]
+                    run_rows.append(dict(condition=cond_id(*c), wall=c[0], limit=c[1], cpu=cpu, policy="none" if pol is None else f"break@{pol}",
+                                         target=T, clear=cl, burst=bu, tease3=r3, total_draws=dr_))
+    for ci, cpu in enumerate(CPUS):
+        for pol in POLICIES:
+            print(f"\n  [{CPU_LABEL[cpu]} / {POLICY_LABEL[pol]}]")
+            metrics = (("クリア率", 0, "{:>8.1%}"), ("バースト率", 1, "{:>8.1%}"), ("焦らし到達率", 2, "{:>8.1%}"), ("総ツモ数", 3, "{:>8.1f}"))
+            for title, j, f in metrics:
+                if pol is not None and j in (1, 2):
+                    continue
+                print(f"    {title:<8}{'目標点':>6} |" + "".join(f"{T:>8}" for T in targets))
                 for c in conds:
-                    cn = f"{COND_NAME[c[0]]}・ツモ{c[1]}"
-                    print(f"  {cn:<22} |" + "".join(f"{runs[(c, ci, pol)][(N, T)][j]:>8.1%}" for T in targets))
+                    print(f"    {cn(c):<14} |" + "".join(f.format(runs[(c, ci, pol)][(N, T)][j]) for T in targets))
     write_csv(os.path.join(outdir, "runs_N%d.csv" % N), run_rows)
 
-    # ---- 3. ちんぽ・専用牌語
+    # ================= 共通の出力 =================
     ded = set(dedicated_words())
-    print("\n=== 3. ちんぽ(専用牌「ぽ」)と専用牌を使う語の出やすさ(分母=アガリ手。平均の何倍か) ===")
+    print(f"\n{'=' * 10} 共通: ちんぽ(専用牌「ぽ」)と専用牌を使う語の出やすさ {'=' * 10}")
+    print("  分母=アガリ手。倍率 = 平均(4語/63語)の何倍か。")
     print(f"  専用牌を使う語({len(ded)}語): " + "、".join(d.words[i]["word"] for i in sorted(ded)))
-    print(f"  {'条件':<22}{'CPU':<6}{'ちんぽ(アガリ手中)':>16}{'倍率':>6}{'全ゲーム中':>10}{'専用牌語の平均倍率':>16}{'それ以外の平均倍率':>16}")
+    print(f"  {'条件':<12}{'CPU':<6}{'ちんぽ(アガリ手中)':>16}{'倍率':>6}{'全ゲーム中':>10}{'専用牌語の平均倍率':>16}{'それ以外の平均倍率':>16}")
     for c in conds:
         for ci, cpu in enumerate(CPUS):
-            s = sums[(c, ci)]
-            wr = word_rows(s)
+            wr = word_rows(sums[(c, ci)])
             pon = next(r for r in wr if r["word"] == "ちんぽ")
             dm = np.mean([r["ratio_vs_mean"] for i, r in enumerate(wr) if i in ded])
             om = np.mean([r["ratio_vs_mean"] for i, r in enumerate(wr) if i not in ded])
-            cn = f"{COND_NAME[c[0]]}・ツモ{c[1]}"
-            print(f"  {cn:<22}{CPU_LABEL[cpu]:<6}{pon['share_of_wins']:>14.2%}{pon['ratio_vs_mean']:>8.2f}{pon['per_game']:>11.3%}{dm:>14.2f}{om:>16.2f}")
+            print(f"  {cn(c):<12}{CPU_LABEL[cpu]:<6}{pon['share_of_wins']:>14.2%}{pon['ratio_vs_mean']:>8.2f}{pon['per_game']:>11.3%}{dm:>14.2f}{om:>16.2f}")
 
-    # ---- 4. 役の比較(強CPU)
-    print("\n=== 4. 役の出現率の比較(分母=アガリ手。強CPU。上位30。全84役・弱CPUはCSV) ===")
+    print(f"\n{'=' * 10} 共通: 役の出現率の比較(分母=アガリ手。強CPU。上位30。全84役・弱CPUはCSV) {'=' * 10}")
     cmp_rows = {}
     for ci, cpu in enumerate(CPUS):
         rows = []
@@ -999,27 +1089,28 @@ def compare_main(args):
             rows.append(r)
         cmp_rows[cpu] = rows
         write_csv(os.path.join(outdir, f"yaku_compare_{cpu}.csv"), rows)
-    print(f"  {'id':<5}{'役名':<12}{'翻':>2}" + "".join(f"{cond_id(*c):>9}" for c in conds) + f"{'組合せ割合':>10}")
-    for r in sorted(cmp_rows["strong"], key=lambda r: -r["share_A10"])[:30]:
-        print(f"  {r['id']:<5}{r['name']:<12}{r['han']:>2}" + "".join(f"{r['share_' + cond_id(*c)]:>9.2%}" for c in conds) + f"{r['combo_rate']:>10.3%}")
-    print("  一度も出なかった役の数: " + " / ".join(
-        f"{CPU_LABEL[cpu]} " + ",".join(f"{cond_id(*c)}={sum(1 for r in cmp_rows[cpu] if r['hits_' + cond_id(*c)] == 0)}" for c in conds)
-        for cpu in CPUS))
+    ref = cond_id("A", 10) if 10 in limits else cond_id(*conds[0])
+    print(f"  {'id':<5}{'役名':<12}{'翻':>2}" + "".join(f"{cond_id(*c):>7}" for c in conds) + f"{'組合せ':>8}")
+    for r in sorted(cmp_rows["strong"], key=lambda r: -r["share_" + ref])[:30]:
+        print(f"  {r['id']:<5}{r['name']:<12}{r['han']:>2}" + "".join(f"{r['share_' + cond_id(*c)]:>7.1%}" for c in conds) + f"{r['combo_rate']:>8.2%}")
+    print("  一度も出なかった役の数(全84役中)")
+    for cpu in CPUS:
+        print(f"    {CPU_LABEL[cpu]}: " + " ".join(f"{cond_id(*c)}={sum(1 for r in cmp_rows[cpu] if r['hits_' + cond_id(*c)] == 0)}" for c in conds))
+    print("    (アガリ回数が少ない条件(特にB・L小)では、出なかった役が増える。誤差の目安は各詳細に記載)")
 
-    # ---- 5. 条件ごとの詳細
-    print("\n=== 5. 条件ごとの詳細 ===")
+    print(f"\n{'=' * 10} 共通: 条件ごとの詳細 {'=' * 10}")
     for c in conds:
         for ci in range(len(CPUS)):
             print_condition_detail(cond_id(*c), ci, sums[(c, ci)], enum, outdir)
 
-    # summary.csv
     srows = []
     for c in conds:
         for ci, cpu in enumerate(CPUS):
             s = sums[(c, ci)]
-            srows.append(dict(condition=cond_id(*c), wall=c[0], draws=c[1], cpu=cpu, games=G,
+            srows.append(dict(condition=cond_id(*c), wall=c[0], limit=c[1], cpu=cpu, games=G,
                               win_rate=s["win"] / G, win_ci95=ci_halfwidth(s["win"], G), tenpai_rate=s["tenpai"] / G,
-                              noten_rate=s["noten"] / G, avg_han=s["avg_han"], avg_turn=s["avg_turn"],
+                              noten_rate=s["noten"] / G, avg_han=s["avg_han"], avg_win_turn=s["avg_turn"],
+                              avg_draws_per_game=avg_draws(c, ci),
                               break_possible=s["break_ok"] / s["tenpai"] if s["tenpai"] else 0.0))
     write_csv(os.path.join(outdir, "summary.csv"), srows)
     print(f"\n完了。経過 {time.time() - t0:.0f}秒。CSV: {outdir}/")
@@ -1060,6 +1151,8 @@ def main():
     ap.add_argument("--compare", action="store_true", help="v1.3: 山の作り(A/B) x ツモ(10/14) x CPU x 崩し方を比較し、results_v1.3/に保存")
     ap.add_argument("--out-compare", default=os.path.join(HERE, "results_v1.3"))
     ap.add_argument("--run-n", default="5", help="--compare の1ランのN")
+    ap.add_argument("--limits", default="6,8,10,12,14", help="--compare: ツモ上限Lの一覧")
+    ap.add_argument("--curve-max", type=int, default=20, help="--compare: 巡目カーブを取るツモ回数の上限")
     ap.add_argument("--validate-games", type=int, default=4000, help="--compare: 近似CPUの検証に使うゲーム数")
     ARGS = args = ap.parse_args()
 
