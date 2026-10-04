@@ -235,7 +235,16 @@ FIXED_HEAD_COPIES = 4  # 喘ぎ牌は6種 x 4枚
 TOPK = 12              # 近似CPU: 手牌との一致が多い上位何語から4語の組を作るか
 
 
-def fixed_wall_counts():
+WALL_RULES = {  # 全語入りの固定の山 B の枚数ルール: (ひらがな・修飾牌の下限枚数, 喘ぎ牌1種あたりの枚数)
+    "Ba": (4, 4),  # (a) max(4, used) / 喘ぎ牌 6種x4枚
+    "Bb": (3, 4),  # (b) max(3, used) / 喘ぎ牌 6種x4枚
+    "Bc": (4, 2),  # (c) max(4, used) / 喘ぎ牌 6種x2枚
+    "B": (4, 4),   # v1.3 までの名前 = (a)
+}
+RULE_LABEL = {"Ba": "(a) max(4,used)・喘ぎ牌4枚", "Bb": "(b) max(3,used)・喘ぎ牌4枚", "Bc": "(c) max(4,used)・喘ぎ牌2枚"}
+
+
+def fixed_wall_counts(min_copies=FIXED_MIN_COPIES, head_copies=FIXED_HEAD_COPIES):
     """全語入り固定の山の構成。戻り値: (牌ごとの枚数 array, 牌→used_in_words)。"""
     d = data()
     used = Counter()
@@ -244,30 +253,36 @@ def fixed_wall_counts():
             used[t] += 1
     counts = np.zeros(d.T, dtype=np.int16)
     for t, u in used.items():
-        counts[d.tid[t]] = max(FIXED_MIN_COPIES, u)
+        counts[d.tid[t]] = max(min_copies, u)
     for h in d.head_idx:
-        counts[h] = FIXED_HEAD_COPIES
+        counts[h] = head_copies
     return counts, used
 
 
-def print_fixed_wall():
+def print_fixed_wall(rule="Ba"):
     d = data()
-    counts, used = fixed_wall_counts()
+    min_c, head_c = WALL_RULES[rule]
+    counts, used = fixed_wall_counts(min_c, head_c)
     tiles = sorted(used, key=lambda t: (-counts[d.tid[t]], t))
     body = sum(int(counts[d.tid[t]]) for t in tiles)
     heads = sum(int(counts[h]) for h in d.head_idx)
-    print("=== 全語入り固定の山(B)の構成: 牌ごとに max(4, used_in_words) 枚 / 喘ぎ牌は6種x4枚 ===")
+    print(f"=== 全語入り固定の山 {RULE_LABEL.get(rule, rule)} の構成: 牌ごとに max({min_c}, used_in_words) 枚 / 喘ぎ牌は6種x{head_c}枚 ===")
     print(f"  {'牌':<6}{'語数':>4}{'枚数':>5}   " * 3)
     rows = [f"  {t:<6}{used[t]:>4}{int(counts[d.tid[t]]):>5}   " for t in tiles]
     for i in range(0, len(rows), 3):
         print("".join(rows[i:i + 3]))
-    print(f"  喘ぎ牌: {' / '.join(HEADS)} 各{FIXED_HEAD_COPIES}枚 = {heads}枚")
+    print(f"  喘ぎ牌: {' / '.join(HEADS)} 各{head_c}枚 = {heads}枚")
     print(f"  ひらがな・修飾牌: {len(tiles)}種 {body}枚 / 喘ぎ牌 {heads}枚 / 合計 {body + heads}枚")
-    ok = (body, heads, body + heads) == (243, 24, 267)
-    print(f"  期待値(243 + 24 = 267)との一致: {'一致' if ok else '不一致'}")
-    if not ok:
-        print(f"  → 差: ひらがな・修飾牌 {body - 243:+d} / 喘ぎ牌 {heads - 24:+d}。words.csv の語数や used_in_words が前提と違う可能性")
-    return ok
+    if rule in ("Ba", "B"):
+        ok = (body, heads, body + heads) == (243, 24, 267)
+        print(f"  期待値(243 + 24 = 267)との一致: {'一致' if ok else '不一致'}")
+        if not ok:
+            print(f"  → 差: ひらがな・修飾牌 {body - 243:+d} / 喘ぎ牌 {heads - 24:+d}。words.csv の語数や used_in_words が前提と違う可能性")
+        return ok
+    short = [t for t in tiles if used[t] < 4]
+    print(f"  (a)との差: ひらがな・修飾牌 {body - 243:+d} / 喘ぎ牌 {heads - 24:+d} / 合計 {body + heads - 267:+d}"
+          + (f"。used<4 の牌 {len(short)}種が影響" if min_c < 4 else ""))
+    return True
 
 
 def rank_pruned(Wp, hand, rem, cpu, rc, head_idx, k=TOPK):
@@ -395,19 +410,24 @@ def complete_words(hand):
     return np.nonzero((data().W <= hand).all(axis=1))[0]
 
 
+def complete_masks(hand):
+    """全語から、手牌に完全に含まれる 4語+喘ぎ牌1枚 の語のマスクを、すべて返す(厳密)。"""
+    d = data()
+    if not hand[d.head_idx].any():
+        return []
+    comp = complete_words(hand)
+    if len(comp) < N_WORDS:
+        return []
+    combos = comp[d.combos(len(comp))]
+    ok = (d.W[combos].sum(axis=1) <= hand).all(axis=1)
+    return [sum(1 << int(i) for i in row) for row in combos[ok]]
+
+
 def find_complete(hand):
     """全語から、手牌に完全に含まれる 4語+喘ぎ牌1枚 を探す(厳密)。翻最大の (翻, 役, マスク) かNone。"""
     d = data()
-    if not hand[d.head_idx].any():
-        return None
-    comp = complete_words(hand)
-    if len(comp) < N_WORDS:
-        return None
-    combos = comp[d.combos(len(comp))]
-    ok = (d.W[combos].sum(axis=1) <= hand).all(axis=1)
     best = None
-    for row in combos[ok]:
-        mask = sum(1 << int(i) for i in row)
+    for mask in complete_masks(hand):
         r = d.eval_mask(mask)
         if best is None or r[0] > best[0]:
             best = (r[0], r[1], mask)
@@ -415,15 +435,15 @@ def find_complete(hand):
 
 
 class FixedSetup:
-    """B: 全語入りの固定の山。毎ゲーム同じ構成をシャッフルするだけ。"""
+    """B: 全語入りの固定の山。毎ゲーム同じ構成をシャッフルするだけ。枚数ルールは WALL_RULES。"""
 
-    _counts = None
+    _counts = {}
 
-    def __init__(self, seed):
+    def __init__(self, seed, rule="Ba"):
         d = data()
-        if FixedSetup._counts is None:
-            FixedSetup._counts = fixed_wall_counts()[0]
-        self.total = FixedSetup._counts
+        if rule not in FixedSetup._counts:
+            FixedSetup._counts[rule] = fixed_wall_counts(*WALL_RULES[rule])[0]
+        self.total = FixedSetup._counts[rule]
         rs = random.Random(seed)
         wall = [t for t in range(d.T) for _ in range(int(self.total[t]))]
         rs.shuffle(wall)
@@ -515,13 +535,76 @@ def play_game(st, cpu, checkpoints, cpu_seed, trace=False):
     return res
 
 
+def feasible_set_count(rule):
+    """その枚数ルールの山で、牌が足りて作れる4語の組(全595,665通りのうち)の数。"""
+    d = data()
+    counts = fixed_wall_counts(*WALL_RULES[rule])[0]
+    combos = d.combos(d.nw)
+    n = 0
+    for i in range(0, len(combos), 50000):
+        need = d.W[combos[i:i + 50000]].sum(axis=1)
+        n += int((need <= counts).all(axis=1).sum())
+    return n, len(combos)
+
+
+def _potential_worker(args):
+    rule, limits, seeds = args
+    d = data()
+    ny = len(d.yaku)
+    tot = {L: 0 for L in limits}
+    hits = {L: [0] * ny for L in limits}
+    anyg = {L: [0] * ny for L in limits}
+    with_set = {L: 0 for L in limits}
+    for g in seeds:
+        st = FixedSetup(g, rule)
+        for L in limits:
+            hand = np.zeros(d.T, dtype=np.int8)
+            for t in st.wall[:HAND + L]:
+                hand[t] += 1
+            masks = complete_masks(hand)
+            if not masks:
+                continue
+            with_set[L] += 1
+            tot[L] += len(masks)
+            seen = set()
+            for m in masks:
+                for i in d.raw_hits(m):
+                    hits[L][i] += 1
+                    seen.add(i)
+            for i in seen:
+                anyg[L][i] += 1
+    return tot, hits, anyg, with_set
+
+
+def potential_stats(rule, limits, n_games, seed0, procs):
+    """山から13+L枚を引いたとき、その中に完成する4語の組を、すべて数える。
+    戻り値 {L: dict(sets=完成する組の総数, share[i]=その役を満たす組の割合, reach[i]=その役が作れる局の割合, any_set=完成が作れる局の割合)}。
+    各牌の枚数を反映した山での『4語の組み合わせとしての割合』。"""
+    d = data()
+    ny = len(d.yaku)
+    k = procs * 4
+    seeds = list(range(seed0, seed0 + n_games))
+    jobs = [(rule, limits, seeds[i::k]) for i in range(k) if seeds[i::k]]
+    with ProcPool(procs) as p:
+        parts = p.map(_potential_worker, jobs)
+    out = {}
+    for L in limits:
+        sets = sum(x[0][L] for x in parts)
+        hits = [sum(x[1][L][i] for x in parts) for i in range(ny)]
+        anyg = [sum(x[2][L][i] for x in parts) for i in range(ny)]
+        ws = sum(x[3][L] for x in parts)
+        out[L] = dict(sets=sets, share=[h / sets if sets else 0.0 for h in hits],
+                      reach=[a / n_games for a in anyg], any_set=ws / n_games)
+    return out
+
+
 def make_setup(wall, seed, pool_size, heads_range):
     if wall == "A":
         return Setup(seed, pool_size, heads_range)
     if wall == "Ap":  # 14語プール + 近似CPU(近似の検証用)
         return Setup(seed, pool_size, heads_range, pruned=True)
-    if wall == "B":
-        return FixedSetup(seed)
+    if wall in WALL_RULES:
+        return FixedSetup(seed, wall)
     raise ValueError(wall)
 
 
