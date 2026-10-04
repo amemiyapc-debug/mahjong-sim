@@ -1494,6 +1494,34 @@ def v14_part2(args, raw, outdir):
                 print(f"  {TABLE_LABEL[table]} x{mult} N={N:<3}{cells}")
     print("  全ステージ・弱CPU・1回あたりの成功率・ステージ別の平均ツモ数は part2_stage_pass.csv")
 
+    # 仕様外の追加探索: 初期目標・倍率を振って、強CPUの平均到達ステージ5〜8・総ツモ300〜500になる条件を探す
+    ex_bases = [int(x) for x in args.extra_bases.split(",") if x]
+    ex_mults = [float(x) for x in args.extra_mults.split(",") if x]
+    if ex_bases:
+        print(f"\n[追加探索(仕様外)] 初期目標 {ex_bases} x 倍率 {ex_mults} x N {Ns} x 点の表(X/Y)。目標点 = 初期目標 x 倍率^(k-1)。強CPUの平均到達5〜8・総ツモ300〜500の条件")
+        erows, ehit = [], []
+        for table in ("X", "Y"):
+            for base in ex_bases:
+                for mult in ex_mults:
+                    for N in Ns:
+                        sm = {}
+                        for ci, cpu in enumerate(CPUS):
+                            o = simulate_stages([g[ci] for g in games], L, mult, N, table, runs, args.seed + ci,
+                                                pile_pt=args.pile_point, burst_at=args.burst_at, cap=args.stage_cap, base=base)
+                            sm[cpu] = stage_summary(o)
+                            erows.append(dict(cpu=cpu, table=table, base=base, mult=mult, N=N, runs=runs, **sm[cpu]))
+                        st_ = sm["strong"]
+                        if 5 <= st_["mean"] <= 8 and 300 <= st_["total_draws"] <= 500:
+                            ehit.append((table, base, mult, N, sm))
+        write_csv(os.path.join(outdir, "part2_extra_summary.csv"), erows)
+        if ehit:
+            for table, base, mult, N, sm in sorted(ehit, key=lambda t: (t[0], t[1], t[2], t[3])):
+                print(f"  {TABLE_LABEL[table]} 初期{base} x{mult} N={N}: 強CPU 平均{sm['strong']['mean']:.1f}(上位10% {sm['strong']['p90']:.0f})・総ツモ{sm['strong']['total_draws']:.0f}"
+                      f" / 弱CPU 平均{sm['weak']['mean']:.1f}・総ツモ{sm['weak']['total_draws']:.0f}")
+        else:
+            print("  該当なし")
+        print(f"  追加探索の全結果: part2_extra_summary.csv ({len(erows)}行)")
+
     print("\n[満貫制(Y)と翻x1,000(X)の比較(同じ倍率・N)] 平均到達ステージ X→Y / 総ツモ数 X→Y")
     for ci, cpu in enumerate(CPUS):
         print(f"  {CPU_LABEL[cpu]}")
@@ -1565,6 +1593,8 @@ def main():
     ap.add_argument("--mults", default="1.3,1.5,1.8", help="--v14 パート2: 目標点の倍率")
     ap.add_argument("--stage-ns", default="4,5,6", help="--v14 パート2: 1ステージのゲーム数N")
     ap.add_argument("--stage-runs", type=int, default=20000, help="--v14 パート2: 条件ごとの挑戦(ラン)数")
+    ap.add_argument("--extra-bases", default="2000,3000,4000", help="--v14 パート2: 追加探索(仕様外)の初期目標。空なら省略")
+    ap.add_argument("--extra-mults", default="1.3,1.5,1.8,2.0", help="--v14 パート2: 追加探索の倍率")
     ap.add_argument("--stage-cap", type=int, default=30, help="--v14 パート2: ステージ数の上限")
     ap.add_argument("--curve-max", type=int, default=20, help="--compare: 巡目カーブを取るツモ回数の上限")
     ap.add_argument("--validate-games", type=int, default=4000, help="--compare: 近似CPUの検証に使うゲーム数")
