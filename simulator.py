@@ -1,259 +1,357 @@
-"""ひらがな麻雀(仮) シミュレーター。仕様は CLAUDE.md が正本。
+"""ひらがな麻雀(仮) シミュレーター v1.1。仕様は CLAUDE.md(v1.1)が正本。
 
-  python3 simulator.py                      # 既定値で1回
-  python3 simulator.py --sweep              # 未決パラメータのスイープ
-  python3 simulator.py --pool-size 12 --draws 10 --heads-per-type 3
+  pip install numpy
+  python3 simulator.py                         # 既定値
+  python3 simulator.py --games 50000 --targets 3000,5000,8000
+  python3 simulator.py --pool-size 12 --heads 2-3 --max-tenpai-retries 3
 
-仕様の未決部分は以下の仮置き(すべてオプションで変更可):
-- アガリ判定: 初期13枚で完成していれば0巡目アガリ。以降はツモ直後の14枚から
-  1枚捨てて13枚が完成する形になれば、そのツモでアガリ(自摸直後判定と捨て後判定は等価)。
-- 山: プールの各語が3牌を1セットずつ出す(共有牌は語数ぶん入る)+ 喘ぎ牌 6種 x heads-per-type 枚。
-- 1手牌に同じ語は2回使えない。
-- 翻: 4語の han_provisional の合計 + お題ワードが手に入っていれば +1。
-  分割が複数あれば翻が最大の分け方を採用。
-- CPU(初級): 捨て牌ごとに「完成語 +10 / 2牌揃い(残り1牌が山にある) +4 / 雀頭 +3」の
-  最大スコアが高くなる牌を捨てる。
+仕様に従った部分:
+- 山 = プールの各語が3牌を1セットずつ出す + 喘ぎ牌(6種から2〜3種を抽選、各1枚)。
+- 手牌13枚。ツモ → 1枚捨てを最大10回。同じ語は1手牌で2回使えない。
+- アガリ形 = 3牌語x4 + 喘ぎ牌1枚。分割が複数あれば翻最大を採用。
+- 翻 = 形で1翻 + 役の加算(同じgroupは最高位のみ、groupなしは加算)。得点 = 翻 x 1,000。
+- アガリ/ノーテンは1ゲーム消費、テンパイ流局は消費しない(1ランの上限回数まで)。
+- テンパイ = 13枚の手牌のうち1枚を入れ替えれば完成形になり、その必要牌が山に残っている状態。
+
+仮置き(オプションで変更可):
+- アガリ判定は「ツモ直後の14枚から1枚捨てて13枚が完成するか」。配牌13枚での完成も0巡目アガリ。
+- 上限回数(--max-tenpai-retries)に達した後のテンパイ流局は、ノーテン同様に1ゲーム消費。
+- CPU(初級): 捨て牌ごとに「山に残っている牌だけで完成できる語セットのうち、手牌との一致枚数が
+  最大のもの」を評価し、その値と到達経路の数が大きくなる牌を捨てる。
 """
 import argparse
 import csv
+import itertools
 import os
 import random
 from collections import Counter
-from functools import lru_cache
+from multiprocessing import Pool as ProcPool
+
+import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HEADS = ["お゛っ", "んぉ゛", "お゛ほ", "やん", "あん", "きゃん"]
-HAND_SIZE = 13
+HAND = 13
 N_WORDS = 4
 
 
-def load_words(path=os.path.join(HERE, "words.csv")):
-    with open(path, encoding="utf-8-sig") as f:
-        return [
-            dict(word=r["word"], tiles=r["tiles"].split("|"), han=int(r["han_provisional"]))
-            for r in csv.DictReader(f)
-        ]
+# ---------------------------------------------------------------- データ読み込み
+def read_csv(name):
+    with open(os.path.join(HERE, name), encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
 
 
-class Pool:
-    """1ラウンド分のプール。牌を整数IDに変換し、判定用の索引を持つ。"""
+class Data:
+    def __init__(self):
+        self.words = read_csv("words.csv")
+        self.yaku = read_csv("yaku.csv")
+        tiles = sorted({t for w in self.words for t in w["tiles"].split("|")}) + HEADS
+        self.tid = {t: i for i, t in enumerate(tiles)}
+        self.tiles = tiles
+        self.T = len(tiles)
+        self.head_idx = [self.tid[h] for h in HEADS]
+        self.W = np.zeros((len(self.words), self.T), dtype=np.int8)
+        for i, w in enumerate(self.words):
+            for t in w["tiles"].split("|"):
+                self.W[i, self.tid[t]] += 1
+        self._yaku_cache = {}
+        self._combos = {}
 
-    def __init__(self, words, heads_per_type):
-        self.words = words
-        names = sorted({t for w in words for t in w["tiles"]}) + HEADS
-        self.tid = {t: i for i, t in enumerate(names)}
-        self.n_tiles = len(names)
-        self.head_ids = [self.tid[h] for h in HEADS]
-        self.word_tiles = [[self.tid[t] for t in w["tiles"]] for w in words]
-        self.word_han = [w["han"] for w in words]
-        self.word_counts = [Counter(ts) for ts in self.word_tiles]
-        self.by_tile = {}
-        for i, c in enumerate(self.word_counts):
-            for t in c:
-                self.by_tile.setdefault(t, []).append(i)
-        wall = [t for ts in self.word_tiles for t in ts]
-        wall += [h for h in self.head_ids for _ in range(heads_per_type)]
-        self.wall_tiles = wall
-        self.wall_counts = Counter(wall)
-        self._win = {}
-        self._score = {}
+    def combos(self, n):
+        if n not in self._combos:
+            self._combos[n] = np.array(list(itertools.combinations(range(n), N_WORDS)), dtype=np.int16)
+        return self._combos[n]
 
-    # --- アガリ判定(厳密な分割。翻最大) ---
-    def best_win(self, hand, topic):
-        """13枚の手牌tupleを4語+雀頭に分割できれば (翻, 使用語index集合) を返す。不可なら None。"""
-        key = (hand, topic)
-        if key in self._win:
-            return self._win[key]
-        counts = Counter(hand)
-        best = [None]
+    # --- 役判定 ---
+    def eval_yaku(self, word_ids):
+        """4語(グローバルindexのfrozenset)に対する (総翻, 成立した役名のtuple)。"""
+        if word_ids in self._yaku_cache:
+            return self._yaku_cache[word_ids]
+        ws = [self.words[i] for i in word_ids]
+        names = {w["word"] for w in ws}
+        mods = Counter(w["modifier"] for w in ws if w["modifier"])
+        stems = Counter(w["stem"] for w in ws if w["stem"])
+        parts = Counter(w["part"] for w in ws if w["part"] and w["part"] != "SM")
+        pairs = {(w["modifier"], w["stem"]) for w in ws if w["modifier"] and w["stem"]}
+        n_single = sum(w["type"] == "単独" for w in ws)
+        n_tail = sum(w["modifier"] in ("穴", "媚") for w in ws)
 
-        def dfs(used, han, head_used):
-            if not counts:
-                if head_used and len(used) == N_WORDS:
-                    total = han + (1 if topic in used else 0)
-                    if best[0] is None or total > best[0][0]:
-                        best[0] = (total, frozenset(used))
-                return
-            t = min(counts)
-            if not head_used and t in self.head_ids_set:
-                counts[t] -= 1
-                if counts[t] == 0:
-                    del counts[t]
-                dfs(used, han, True)
-                counts[t] = counts.get(t, 0) + 1
-            if len(used) == N_WORDS:
-                return
-            for wi in self.by_tile.get(t, ()):
-                if wi in used:
-                    continue
-                wc = self.word_counts[wi]
-                if all(counts.get(k, 0) >= v for k, v in wc.items()):
-                    for k, v in wc.items():
-                        counts[k] -= v
-                        if counts[k] == 0:
-                            del counts[k]
-                    used.add(wi)
-                    dfs(used, han + self.word_han[wi], head_used)
-                    used.discard(wi)
-                    for k, v in wc.items():
-                        counts[k] = counts.get(k, 0) + v
+        def ok(y):
+            ct, p = y["condition_type"], y["params"]
+            if ct == "count_same_modifier":
+                return max(mods.values(), default=0) >= int(p)
+            if ct == "count_same_stem":
+                return max(stems.values(), default=0) >= int(p)
+            if ct == "count_same_part":
+                return max(parts.values(), default=0) >= int(p)
+            if ct == "singles_eq":
+                return n_single == int(p)
+            if ct == "count_tail_modifier":
+                return n_tail >= int(p)
+            if ct == "count_in_set":
+                kv = dict(x.split("=") for x in p.split(";"))
+                return len(names & set(kv["set"].split("|"))) >= int(kv["min"])
+            if ct == "contains_all":
+                return any(set(g.split("|")) <= names for g in p.split("/"))
+            if ct == "pair_same_stem_modifiers":
+                m = p.split("|")
+                return any(all((x, s) in pairs for x in m) for s in stems)
+            raise ValueError(f"未対応のcondition_type: {ct}")
 
-        dfs(set(), 0, False)
-        self._win[key] = best[0]
-        return best[0]
+        hit = [y for y in self.yaku if ok(y)]
+        best_in_group = {}
+        for y in hit:
+            g = y["group"]
+            if g and (g not in best_in_group or int(y["han_provisional"]) > int(best_in_group[g]["han_provisional"])):
+                best_in_group[g] = y
+        chosen = [y for y in hit if not y["group"]] + list(best_in_group.values())
+        han = 1 + sum(int(y["han_provisional"]) for y in chosen)
+        res = (han, tuple(y["name"] for y in chosen))
+        self._yaku_cache[word_ids] = res
+        return res
 
-    @property
-    def head_ids_set(self):
-        if not hasattr(self, "_hs"):
-            self._hs = set(self.head_ids)
-        return self._hs
 
-    # --- CPUの評価関数 ---
-    def score(self, hand):
-        if hand in self._score:
-            return self._score[hand]
-        counts = Counter(hand)
-        cands = []  # (value, Counter of tiles consumed)
-        for wi, wc in enumerate(self.word_counts):
-            have = sum(min(counts.get(t, 0), n) for t, n in wc.items())
-            if have == 3:
-                cands.append((10, {t: min(counts[t], n) for t, n in wc.items()}))
-            elif have == 2:
-                got = {t: min(counts.get(t, 0), n) for t, n in wc.items() if counts.get(t, 0)}
-                missing = [t for t, n in wc.items() if counts.get(t, 0) < n]
-                if missing and self.wall_counts.get(missing[0], 0) > 0:
-                    cands.append((4, got))
-        best = 0
+_DATA = None
 
-        def dfs(i, left, n, val):
-            nonlocal best
-            if val > best:
-                best = val
-            if n == N_WORDS:
-                return
-            for j in range(i, len(cands)):
-                v, need = cands[j]
-                if all(left.get(k, 0) >= c for k, c in need.items()):
-                    for k, c in need.items():
-                        left[k] -= c
-                    dfs(j + 1, left, n + 1, val + v)
-                    for k, c in need.items():
-                        left[k] += c
 
-        dfs(0, dict(counts), 0, 0)
-        if any(h in counts for h in self.head_ids):
-            best += 3
-        self._score[hand] = best
+def data():
+    global _DATA
+    if _DATA is None:
+        _DATA = Data()
+    return _DATA
+
+
+# ---------------------------------------------------------------- 1ゲーム
+def play_game(rng, pool_size, max_draws, heads_range):
+    """戻り値: ("win", 翻, 役名tuple, 巡目) / ("tenpai",) / ("noten",)"""
+    d = data()
+    idx = rng.sample(range(len(d.words)), pool_size)
+    k = rng.randint(*heads_range)
+    heads = [d.head_idx[i] for i in rng.sample(range(len(HEADS)), k)]
+
+    Wp = d.W[idx]  # プール語 x 牌
+    total = Wp.sum(axis=0).astype(np.int16)
+    for h in heads:
+        total[h] += 1
+    wall = [t for t in range(d.T) for _ in range(total[t])]
+    rng.shuffle(wall)
+
+    # 完成形(4語+喘ぎ牌1枚)の全候補。行 = 候補、列 = 牌
+    combo = d.combos(pool_size)
+    S0 = Wp[combo].sum(axis=1).astype(np.int8)
+    rows, row_combo = [], []
+    for h in heads:
+        s = S0.copy()
+        s[:, h] += 1
+        rows.append(s)
+        row_combo.append(np.arange(len(combo)))
+    S = np.concatenate(rows)
+    row_combo = np.concatenate(row_combo)
+
+    def eye(t):
+        v = np.zeros(d.T, dtype=np.int8)
+        v[t] = 1
+        return v
+
+    def best_complete(h):
+        """手牌h(13枚以上)に完全に含まれる候補のうち翻最大のもの。なければNone。"""
+        full = np.minimum(S, h).sum(axis=1) == HAND
+        if not full.any():
+            return None
+        best = None
+        for ci in set(row_combo[full].tolist()):
+            gids = frozenset(idx[j] for j in combo[ci])
+            han, names = d.eval_yaku(gids)
+            if best is None or han > best[0]:
+                best = (han, names)
         return best
 
+    hand = np.zeros(d.T, dtype=np.int8)
+    rem = total.astype(np.int16)  # 山に残っている牌
+    for t in wall[:HAND]:
+        hand[t] += 1
+        rem[t] -= 1
+    pos = HAND
 
-def play_round(pool, topic, draws, rng):
-    """1ラウンドを回す。戻り値は (アガったか, 巡目, 翻, 使用語index集合)。"""
-    wall = pool.wall_tiles[:]
-    rng.shuffle(wall)
-    hand = sorted(wall[:HAND_SIZE])
-    wall = wall[HAND_SIZE:]
-    r = pool.best_win(tuple(hand), topic)
+    r = best_complete(hand)
     if r:
-        return True, 0, r[0], r[1]
-    for turn in range(1, draws + 1):
-        if not wall:
+        return ("win", r[0], r[1], 0)
+
+    final_best = 0
+    for turn in range(1, max_draws + 1):
+        if pos >= len(wall):
             break
-        hand.append(wall.pop())
-        # アガリ判定: 14枚から1枚捨てて13枚が完成するか
-        win = None
-        for t in set(hand):
-            h = hand[:]
-            h.remove(t)
-            r = pool.best_win(tuple(sorted(h)), topic)
-            if r and (win is None or r[0] > win[0]):
-                win = r
-        if win:
-            return True, turn, win[0], win[1]
-        # 初級CPU: スコアが最大になる牌を捨てる(同点はランダム)
-        cands = []
-        for t in set(hand):
-            h = hand[:]
-            h.remove(t)
-            cands.append((pool.score(tuple(sorted(h))), rng.random(), t))
-        _, _, d = max(cands)
-        hand.remove(d)
-    return False, None, 0, frozenset()
+        t = wall[pos]
+        pos += 1
+        hand[t] += 1
+        rem[t] -= 1
+        r = best_complete(hand)
+        if r:
+            return ("win", r[0], r[1], turn)
+
+        # 初級CPU: 残り牌だけで完成できる候補のうち、一致枚数が最大になる牌を残す
+        m14 = np.minimum(S, hand).sum(axis=1)
+        feas14 = (np.clip(S - hand, 0, None) <= rem).all(axis=1)
+        if feas14.any():
+            top = m14[feas14].max()
+            keep = feas14 & (m14 >= top - 1)
+            Sk = S[keep]
+        else:
+            Sk = S[:0]
+        best_key, best_t = None, None
+        for c in np.nonzero(hand)[0]:
+            h2 = hand.copy()
+            h2[c] -= 1
+            if len(Sk):
+                m = np.minimum(Sk, h2).sum(axis=1)
+                f = (np.clip(Sk - h2, 0, None) <= rem).all(axis=1)
+                if f.any():
+                    mm = m[f].max()
+                    key = (int(mm), int((f & (m == mm)).sum()), rng.random())
+                else:
+                    key = (0, 0, rng.random())
+            else:
+                key = (0, 0, rng.random())
+            if best_key is None or key > best_key:
+                best_key, best_t = key, c
+        hand[best_t] -= 1
+        final_best = best_key[0]
+
+    # テンパイ = 手牌13枚のうち1枚を入れ替えれば完成し、その必要牌が山に残っている
+    return ("tenpai",) if final_best == HAND - 1 else ("noten",)
 
 
-def simulate(words, sims, pool_size, draws, heads_per_type, seed):
+def worker(args):
+    seed, n, pool_size, max_draws, heads_range = args
     rng = random.Random(seed)
-    n = len(words)
-    stat = dict(wins=0, turn_sum=0, han_sum=0, topic_hit=0)
-    turn_hist = Counter()
-    in_pool = Counter()
-    in_win = Counter()
-    for _ in range(sims):
-        idx = rng.sample(range(n), pool_size)
-        pw = [words[i] for i in idx]
-        pool = Pool(pw, heads_per_type)
-        topic = rng.randrange(pool_size)
-        for i in idx:
-            in_pool[i] += 1
-        ok, turn, han, used = play_round(pool, topic, draws, rng)
-        if ok:
-            stat["wins"] += 1
-            stat["turn_sum"] += turn
-            stat["han_sum"] += han
-            turn_hist[turn] += 1
-            if topic in used:
-                stat["topic_hit"] += 1
-            for wi in used:
-                in_win[idx[wi]] += 1
-    return stat, turn_hist, in_pool, in_win
+    return [play_game(rng, pool_size, max_draws, heads_range) for _ in range(n)]
 
 
-def report(words, sims, pool_size, draws, heads, seed, detail=True):
-    stat, hist, in_pool, in_win = simulate(words, sims, pool_size, draws, heads, seed)
-    w = stat["wins"]
-    print(f"--- プール{pool_size}語 / ツモ{draws}回 / 喘ぎ牌{heads}枚x6種 / {sims}ラウンド ---")
-    print(f"アガリ率: {w / sims:.1%} ({w}/{sims})")
-    if w:
-        print(f"平均アガリ巡目: {stat['turn_sum'] / w:.2f}  (0=配牌アガリ)")
-        print(f"平均翻: {stat['han_sum'] / w:.2f}")
-        print(f"お題ワード達成率(アガリ中): {stat['topic_hit'] / w:.1%}  (全ラウンド中: {stat['topic_hit'] / sims:.1%})")
-    if detail:
-        print("巡目別アガリ数:", dict(sorted(hist.items())))
-        print("\n語ごとの出現率(アガリ手に入った回数 / プールに入った回数):")
-        rows = sorted(
-            ((in_win[i] / in_pool[i] if in_pool[i] else 0, words[i]["word"], in_win[i], in_pool[i]) for i in range(len(words))),
-            reverse=True,
-        )
-        for rate, name, a, b in rows:
-            print(f"  {name:<8} {rate:6.1%}  ({a}/{b})")
-    print()
+def run_games(n_games, pool_size, max_draws, heads_range, seed, procs):
+    chunks = max(procs * 4, 1)
+    per = [n_games // chunks + (1 if i < n_games % chunks else 0) for i in range(chunks)]
+    jobs = [(seed * 100003 + i, per[i], pool_size, max_draws, heads_range) for i in range(chunks) if per[i]]
+    if procs > 1:
+        with ProcPool(procs) as p:
+            parts = p.map(worker, jobs)
+    else:
+        parts = [worker(j) for j in jobs]
+    return [g for part in parts for g in part]
+
+
+# ---------------------------------------------------------------- 集計
+def summarize(games, han_point):
+    n = len(games)
+    wins = [g for g in games if g[0] == "win"]
+    tenpai = sum(g[0] == "tenpai" for g in games)
+    noten = sum(g[0] == "noten" for g in games)
+    out = {"n": n, "win": len(wins), "tenpai": tenpai, "noten": noten}
+    out["han_hist"] = Counter(g[1] for g in wins)
+    out["yaku"] = Counter(name for g in wins for name in g[2])
+    out["yaku_none"] = sum(1 for g in wins if not g[2])
+    out["turn_hist"] = Counter(g[3] for g in wins)
+    out["avg_han"] = sum(g[1] for g in wins) / len(wins) if wins else 0.0
+    out["avg_turn"] = sum(g[3] for g in wins) / len(wins) if wins else 0.0
+    out["avg_score_per_game"] = sum(g[1] for g in wins) * han_point / n
+    return out
+
+
+def clear_rates(games, n_range, targets, retries, han_point, runs, seed):
+    """ゲームは独立なので、結果を再抽選して1ランを再現し、(N, 目標点)ごとのクリア率を出す。
+    戻り値: {上限R: ({(N, 目標点): クリア率}, 1ランあたりのテンパイ再抽選の平均回数)}"""
+    rng = np.random.default_rng(seed)
+    kind = np.array([0 if g[0] == "win" else 1 if g[0] == "tenpai" else 2 for g in games])
+    score = np.array([g[1] * han_point if g[0] == "win" else 0 for g in games])
+    n_max = max(n_range)
+    res = {}
+    for R in retries:
+        cum = np.zeros(runs, dtype=np.int64)
+        used = np.zeros(runs, dtype=np.int32)
+        ret = np.zeros(runs, dtype=np.int32)
+        cum_at = np.zeros((n_max + 1, runs), dtype=np.int64)
+        while (used < n_max).any():
+            act = used < n_max
+            gi = rng.integers(0, len(games), size=runs)
+            k, s = kind[gi], score[gi]
+            free = act & (k == 1) & (ret < R)  # 消費しないテンパイ流局
+            ret[free] += 1
+            spend = act & ~free
+            cum[spend] += s[spend]
+            used[spend] += 1
+            idx = np.nonzero(spend)[0]
+            cum_at[used[idx], idx] = cum[idx]
+        res[R] = {
+            (N, T): float((cum_at[N] >= T).mean()) for N in n_range for T in targets
+        }, float(ret.mean())
+    return res
+
+
+def print_report(args, games, heads_range):
+    han_point = args.han_point
+    s = summarize(games, han_point)
+    n = s["n"]
+    print(f"=== 設定: プール{args.pool_size}語 / 最大ツモ{args.max_draws}回 / 喘ぎ牌{heads_range[0]}〜{heads_range[1]}種x各1枚 / {n}ゲーム ===")
+    print(f"アガリ率      : {s['win'] / n:6.1%}  ({s['win']}/{n})")
+    print(f"テンパイ流局率: {s['tenpai'] / n:6.1%}  ({s['tenpai']}/{n})  ← ゲーム消費なし(上限あり)")
+    print(f"ノーテン率    : {s['noten'] / n:6.1%}  ({s['noten']}/{n})  ← 1ゲーム消費")
+    print(f"アガリ時の平均巡目: {s['avg_turn']:.2f}   平均翻: {s['avg_han']:.2f}")
+    print(f"1ゲームあたり平均得点(全ゲーム): {s['avg_score_per_game']:.0f}点")
+    print(f"巡目別アガリ数: {dict(sorted(s['turn_hist'].items()))}")
+
+    print("\n[翻の分布](アガリ時、形1翻+役)")
+    w = s["win"]
+    for han in sorted(s["han_hist"]):
+        c = s["han_hist"][han]
+        print(f"  {han:>2}翻 ({han * han_point:>6}点): {c:>5}  {c / w:6.1%}  {'#' * round(40 * c / w)}")
+
+    print("\n[役ごとの出現率]  分母A=アガリ手 / 分母B=全ゲーム")
+    print(f"  {'役':<12}{'翻':>3}  {'アガリ手中':>8}  {'全ゲーム中':>8}")
+    han_of = {y['name']: int(y['han_provisional']) for y in data().yaku}
+    order = sorted(data().yaku, key=lambda y: -s["yaku"].get(y["name"], 0))
+    for y in order:
+        c = s["yaku"].get(y["name"], 0)
+        print(f"  {y['name']:<12}{han_of[y['name']]:>3}  {c / w if w else 0:>9.1%}  {c / n:>9.2%}   ({c})")
+    print(f"  {'(役なし=形のみ1翻)':<14}{'':>1}  {s['yaku_none'] / w if w else 0:>9.1%}  {s['yaku_none'] / n:>9.2%}   ({s['yaku_none']})")
+
+
+def print_clear(args, games):
+    targets = [int(x) for x in args.targets.split(",")]
+    lo, hi = (int(x) for x in args.n_range.split("-"))
+    n_range = list(range(lo, hi + 1))
+    retries = [int(x) for x in args.max_tenpai_retries.split(",")]
+    res = clear_rates(games, n_range, targets, retries, args.han_point, args.runs, args.seed)
+    for R in retries:
+        table, avg_ret = res[R]
+        print(f"\n[クリア率] テンパイ流局の再抽選上限={R}回/ラン (実際の平均使用 {avg_ret:.2f}回)  {args.runs}ラン")
+        print(f"  {'目標点':>7} |" + "".join(f"{'N=' + str(N):>7}" for N in n_range))
+        for T in targets:
+            print(f"  {T:>7} |" + "".join(f"{table[(N, T)]:>7.1%}" for N in n_range))
+
+
+def parse_range(s):
+    a, _, b = s.partition("-")
+    return (int(a), int(b or a))
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sims", type=int, default=5000)
+    ap.add_argument("--games", type=int, default=20000, help="1ゲームのシミュレーション回数")
     ap.add_argument("--pool-size", type=int, default=14)
-    ap.add_argument("--draws", type=int, default=9)
-    ap.add_argument("--heads-per-type", type=int, default=2)
+    ap.add_argument("--max-draws", type=int, default=10)
+    ap.add_argument("--heads", default="2-3", help="喘ぎ牌の種類数(各1枚)。例: 2-3 / 3")
+    ap.add_argument("--han-point", type=int, default=1000, help="1翻あたりの点数")
+    ap.add_argument("--n-range", default="3-8", help="規定ゲーム数Nの範囲")
+    ap.add_argument("--targets", default="2000,3000,4000,6000,8000,10000", help="目標点(カンマ区切り)")
+    ap.add_argument("--max-tenpai-retries", default="0,3,10", help="テンパイ流局の再抽選上限/ラン(カンマ区切りで複数可)")
+    ap.add_argument("--runs", type=int, default=200000, help="クリア率計算のラン数")
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--sweep", action="store_true")
-    ap.add_argument("--quiet", action="store_true", help="語ごとの表を省略")
-    a = ap.parse_args()
-    words = load_words()
-    if not a.sweep:
-        report(words, a.sims, a.pool_size, a.draws, a.heads_per_type, a.seed, not a.quiet)
-        return
-    print(f"{'プール':>4} {'ツモ':>3} {'喘ぎ':>3} | {'アガリ率':>7} {'平均巡目':>7} {'平均翻':>6} {'お題達成':>7}")
-    for pool_size in (10, 12, 14, 16, 18, 20):
-        for draws in (8, 9, 10):
-            for heads in (1, 2, 3):
-                s, _, _, _ = simulate(words, a.sims, pool_size, draws, heads, a.seed)
-                w = s["wins"]
-                print(
-                    f"{pool_size:>6} {draws:>3} {heads:>3} | {w / a.sims:>7.1%} "
-                    f"{(s['turn_sum'] / w if w else 0):>8.2f} {(s['han_sum'] / w if w else 0):>6.2f} "
-                    f"{(s['topic_hit'] / w if w else 0):>8.1%}"
-                )
+    ap.add_argument("--procs", type=int, default=os.cpu_count() or 1)
+    args = ap.parse_args()
+
+    heads_range = parse_range(args.heads)
+    games = run_games(args.games, args.pool_size, args.max_draws, heads_range, args.seed, args.procs)
+    print_report(args, games, heads_range)
+    print_clear(args, games)
 
 
 if __name__ == "__main__":
