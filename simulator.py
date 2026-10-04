@@ -1609,6 +1609,73 @@ def v14_main(args):
     report.close()
 
 
+# ---------------------------------------------------------------- v1.5: 基準条件の確認(画面は15行以内、詳細はCSV)
+def v15_main(args):
+    outdir = args.out_v15
+    os.makedirs(outdir, exist_ok=True)
+    d = data()
+    heads_range = parse_range(args.heads)
+    L, N, mult, base, table = 12, 5, 1.3, 2000, "Y"
+    t0 = time.time()
+    enum = enumerate_yaku(args.procs)
+    raw = collect(args, heads_range, ("Ba",), (L,), kinds=("win",))
+    G = len(raw)
+    games = view(raw, "Ba", L)
+    sums = [summarize(games, ci) for ci in range(len(CPUS))]
+    stg = []
+    for ci in range(len(CPUS)):
+        o = simulate_stages([g[ci] for g in games], L, mult, N, table, args.stage_runs, args.seed + ci, base=base, pile_pt=args.pile_point)
+        stg.append((o, stage_summary(o)))
+
+    # ---- CSV(詳細)
+    rows_g, rows_s = [], []
+    for ci, cpu in enumerate(CPUS):
+        s = sums[ci]
+        write_csv(os.path.join(outdir, f"yaku_{cpu}.csv"), yaku_rows(s, enum))
+        write_csv(os.path.join(outdir, f"words_{cpu}.csv"), word_rows(s))
+        hh = s["han_hist"]
+        rows_g.append(dict(cpu=cpu, games=G, win_rate=s["win"] / G, win_ci95=ci_halfwidth(s["win"], G), tenpai_rate=s["tenpai"] / G,
+                           noten_rate=s["noten"] / G, avg_han=s["avg_han"], avg_win_turn=s["avg_turn"],
+                           han_ge5=sum(v for k, v in hh.items() if k >= 5) / max(s["win"], 1),
+                           han_ge8=sum(v for k, v in hh.items() if k >= 8) / max(s["win"], 1),
+                           **{f"han_{k}": hh.get(k, 0) for k in range(1, 16)}))
+        o, sm = stg[ci]
+        rows_s.append(dict(cpu=cpu, wall="Ba", L=L, N=N, mult=mult, base=base, table=table, runs=args.stage_runs, **sm))
+        write_csv(os.path.join(outdir, f"stage_pass_{cpu}.csv"),
+                  [dict(stage=k, target=base * mult ** (k - 1), reach=int(o["reach"][k]), cleared=int(o["success"][k]),
+                        pass_rate=o["success"][k] / o["reach"][k], mean_draws=o["dstage"][k] / o["reach"][k])
+                   for k in range(1, args.stage_cap + 1) if o["reach"][k]])
+    write_csv(os.path.join(outdir, "game_summary.csv"), rows_g)
+    write_csv(os.path.join(outdir, "stage_summary.csv"), rows_s)
+
+    # ---- 画面(15行以内)
+    out = []
+    ok_tests = "one_from_each(童貞目線)=別々の語を割り当てる判定を全595,665組で確認済み"
+    out.append(f"[v1.5] 全語入りの山(a)・L={L}・{G}ゲーム / ステージ制: 初期{base}・x{mult}・N={N}・満貫制・{args.stage_runs}回。{ok_tests}")
+    out.append("アガリ率  強 {:.1%}±{:.1f} / 弱 {:.1%}±{:.1f}".format(sums[0]["win"] / G, ci_halfwidth(sums[0]["win"], G) * 100, sums[1]["win"] / G, ci_halfwidth(sums[1]["win"], G) * 100))
+    for ci, cpu in enumerate(CPUS):
+        s = sums[ci]
+        hh = s["han_hist"]
+        w = max(s["win"], 1)
+        g5 = sum(v for k, v in hh.items() if k >= 5) / w
+        g8 = sum(v for k, v in hh.items() if k >= 8) / w
+        yr = yaku_rows(s, enum)
+        hit = sorted((r for r in yr if r["hits"] > 0), key=lambda r: -r["hits"])
+        zero = [r for r in yr if r["hits"] == 0]
+        sm = stg[ci][1]
+        lab = CPU_LABEL[cpu]
+        out.append(f"{lab} 翻: 5翻以上 {g5:.1%} / 8翻以上 {g8:.1%}(平均{s['avg_han']:.2f}翻)")
+        out.append(f"{lab} 役 上位10: " + " ".join(f"{r['name']}{r['share_of_wins']:.1%}" for r in hit[:10]))
+        out.append(f"{lab} 役 下位10(出たもの): " + " ".join(f"{r['name']}{r['share_of_wins']:.2%}" for r in hit[-10:][::-1]))
+        out.append(f"{lab} 出なかった役 {len(zero)}/{len(yr)}: " + "、".join(r["name"] for r in zero))
+        out.append(f"{lab} ステージ: 平均到達 {sm['mean']:.1f}(中央{sm['median']:.0f}・上位10% {sm['p90']:.0f}) / 総ツモ {sm['total_draws']:.0f} / "
+                   f"焦らし 1ゲーム {sm['tease_per_game']:.1%}・1挑戦 {sm['tease_run_rate']:.1%}")
+    out.append(f"詳細(全役・全語・ステージ別突破率): {outdir}/ 経過{time.time() - t0:.0f}秒")
+    with open(os.path.join(outdir, "report.txt"), "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+    print("\n".join(out))
+
+
 def parse_range(s):
     a, _, b = s.partition("-")
     return (int(a), int(b or a))
@@ -1644,6 +1711,8 @@ def main():
     ap.add_argument("--run-n", default="5", help="--compare の1ランのN")
     ap.add_argument("--limits", default="6,8,10,12,14", help="--compare: ツモ上限Lの一覧")
     ap.add_argument("--v14", action="store_true", help="v1.4: 枚数ルール(a/b/c) x L=11,12,13 (パート1) と ステージ制(パート2)。results_v1.4/に保存")
+    ap.add_argument("--v15", action="store_true", help="v1.5: 基準条件(山(a)・L=12)の確認。画面は15行以内、詳細はresults_v1.5/")
+    ap.add_argument("--out-v15", default=os.path.join(HERE, "results_v1.5"))
     ap.add_argument("--out-v14", default=os.path.join(HERE, "results_v1.4"))
     ap.add_argument("--cache", default="", help="--v14: パート1のゲーム結果のキャッシュ(pickle)。同じ設定ならパート2だけ再実行できる")
     ap.add_argument("--pot-games", type=int, default=20000, help="--v14: 枚数を反映した組み合わせ割合に使う、山から引く局数")
@@ -1658,6 +1727,9 @@ def main():
     ap.add_argument("--validate-games", type=int, default=4000, help="--compare: 近似CPUの検証に使うゲーム数")
     ARGS = args = ap.parse_args()
 
+    if args.v15:
+        v15_main(args)
+        return
     if args.v14:
         if args.limits == "6,8,10,12,14":
             args.limits = "11,12,13"

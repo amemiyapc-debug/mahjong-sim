@@ -20,8 +20,8 @@ def indep(ws,y):
     if ct=='count_tail_same_part':
         c=Counter(w['part'] for w in ws if w['position']=='語尾' and w['part'] not in('','SM')); return max(c.values(),default=0)>=int(kv(p)['n'])
     if ct=='singles_eq': return sum(w['type']=='単独' for w in ws)==int(kv(p)['n'])
-    if ct=='count_in_set': a=kv(p); return len(names&set(a['set'].split('|')))>=int(a['min'])
-    if ct=='all_in_set': return names<=set(kv(p)['set'].split('|'))
+    if ct=='count_in_set': a=kv(p); return sum(any(match(t,w) for t in a['set'].split('|')) for w in ws)>=int(a['min'])
+    if ct=='all_in_set': return all(any(match(t,w) for t in kv(p)['set'].split('|')) for w in ws)
     if ct=='contains_all': return any(all(t in names for t in g.split('|')) for g in p.split('/'))
     if ct=='one_from_each':
         groups=[g.split('|') for g in p.split(';')]
