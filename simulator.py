@@ -228,48 +228,74 @@ def enumerate_yaku(procs):
 
 
 # ---------------------------------------------------------------- 2. 1ゲーム
-class Setup:
-    """1ゲーム分の盤面(プール・山・完成形の全候補)。強弱CPUで共有する。"""
-
-    def __init__(self, seed, pool_size, heads_range):
-        d = data()
-        rs = random.Random(seed)
-        self.idx = rs.sample(range(d.nw), pool_size)
-        k = rs.randint(*heads_range)
-        heads = [d.head_idx[i] for i in rs.sample(range(len(HEADS)), k)]
-        Wp = d.W[self.idx]
-        total = Wp.sum(axis=0).astype(np.int16)
-        for h in heads:
-            total[h] += 1
-        self.total = total
-        wall = [t for t in range(d.T) for _ in range(total[t])]
-        rs.shuffle(wall)
-        self.wall = wall
-        # 完成形(4語+喘ぎ牌1枚)の全候補。行 = 候補、列 = 牌
-        self.combo = d.combos(pool_size)
-        S0 = Wp[self.combo].sum(axis=1).astype(np.int8)
-        rows = []
-        for h in heads:
-            s = S0.copy()
-            s[:, h] += 1
-            rows.append(s)
-        self.S = np.concatenate(rows)
-        self.row_combo = np.tile(np.arange(len(self.combo)), len(heads))
-        self.combo_mask = [sum(1 << self.idx[j] for j in c) for c in self.combo]
+FIXED_MIN_COPIES = 4   # 全語入りの固定の山: ひらがな・修飾牌は max(4, used_in_words) 枚
+FIXED_HEAD_COPIES = 4  # 喘ぎ牌は6種 x 4枚
+TOPK = 12              # 近似CPU: 手牌との一致が多い上位何語から4語の組を作るか
 
 
-def best_complete(st, hand):
-    """手牌に完全に含まれる完成形のうち、翻が最大のもの。なければNone。"""
+def fixed_wall_counts():
+    """全語入り固定の山の構成。戻り値: (牌ごとの枚数 array, 牌→used_in_words)。"""
     d = data()
-    full = np.minimum(st.S, hand).sum(axis=1) == HAND
-    if not full.any():
-        return None
-    best = None
-    for ci in set(st.row_combo[full].tolist()):
-        r = d.eval_mask(st.combo_mask[ci])
-        if best is None or r[0] > best[0]:
-            best = r
-    return best
+    used = Counter()
+    for w in d.words:
+        for t in set(w["tiles"].split("|")):  # 同じ語で2回出る牌も1語と数える
+            used[t] += 1
+    counts = np.zeros(d.T, dtype=np.int16)
+    for t, u in used.items():
+        counts[d.tid[t]] = max(FIXED_MIN_COPIES, u)
+    for h in d.head_idx:
+        counts[h] = FIXED_HEAD_COPIES
+    return counts, used
+
+
+def print_fixed_wall():
+    d = data()
+    counts, used = fixed_wall_counts()
+    tiles = sorted(used, key=lambda t: (-counts[d.tid[t]], t))
+    body = sum(int(counts[d.tid[t]]) for t in tiles)
+    heads = sum(int(counts[h]) for h in d.head_idx)
+    print("=== 全語入り固定の山(B)の構成: 牌ごとに max(4, used_in_words) 枚 / 喘ぎ牌は6種x4枚 ===")
+    print(f"  {'牌':<6}{'語数':>4}{'枚数':>5}   " * 3)
+    rows = [f"  {t:<6}{used[t]:>4}{int(counts[d.tid[t]]):>5}   " for t in tiles]
+    for i in range(0, len(rows), 3):
+        print("".join(rows[i:i + 3]))
+    print(f"  喘ぎ牌: {' / '.join(HEADS)} 各{FIXED_HEAD_COPIES}枚 = {heads}枚")
+    print(f"  ひらがな・修飾牌: {len(tiles)}種 {body}枚 / 喘ぎ牌 {heads}枚 / 合計 {body + heads}枚")
+    ok = (body, heads, body + heads) == (243, 24, 267)
+    print(f"  期待値(243 + 24 = 267)との一致: {'一致' if ok else '不一致'}")
+    if not ok:
+        print(f"  → 差: ひらがな・修飾牌 {body - 243:+d} / 喘ぎ牌 {heads - 24:+d}。words.csv の語数や used_in_words が前提と違う可能性")
+    return ok
+
+
+def rank_pruned(Wp, hand, rem, cpu, rc, head_idx, k=TOPK):
+    """近似CPU(全語入りの山用)。手牌との一致が多い上位k語から4語の組を作り、
+    組との一致枚数(+喘ぎ牌)が最大になる捨て牌を選ぶ。強CPUは山の残りで足りる組だけを数える。
+    戻り値は Setup.rank_discards と同じ [(key, 捨てる牌, 捨てた後の手牌)]。"""
+    d = data()
+    o = np.minimum(Wp, hand).sum(axis=1)
+    order = np.argsort(-o, kind="stable")[:k]
+    sel = Wp[order]
+    if len(order) >= N_WORDS:
+        Ssub = sel[d.combos(len(order))].sum(axis=1)
+    else:
+        Ssub = sel.sum(axis=0, keepdims=True)
+    cands = []
+    for c in np.nonzero(hand)[0]:
+        h2 = hand.copy()
+        h2[c] -= 1
+        m = np.minimum(Ssub, h2).sum(axis=1) + (1 if h2[head_idx].any() else 0)
+        if cpu == "strong":
+            f = (np.clip(Ssub - h2, 0, None) <= rem).all(axis=1)
+            if f.any():
+                mm = m[f].max()
+                key = (int(mm), int((f & (m == mm)).sum()), rc.random())
+            else:
+                key = (0, 0, rc.random())
+        else:
+            key = (int(m.max()), 0, rc.random())
+        cands.append((key, c, h2))
+    return cands
 
 
 def is_tenpai(R, h, rem):
@@ -281,33 +307,53 @@ def is_tenpai(R, h, rem):
     return bool(((m == HAND - 1) & f).any())
 
 
-def play_game(st, cpu, max_draws, cpu_seed):
-    """戻り値: ("win", 翻, 役index tuple, 巡目) / ("tenpai", 崩せるか) / ("noten",)"""
-    d = data()
-    rc = random.Random(cpu_seed)
-    S = st.S
-    hand = np.zeros(d.T, dtype=np.int8)
-    rem = st.total.astype(np.int16)  # 山に残っている牌
-    for t in st.wall[:HAND]:
-        hand[t] += 1
-        rem[t] -= 1
-    pos = HAND
+class Setup:
+    """A: 1ゲーム分の盤面(14語のプール・山・完成形の全候補)。強弱CPUで共有する。"""
 
-    r = best_complete(st, hand)
-    if r:
-        return ("win", r[0], r[1], 0)
+    def __init__(self, seed, pool_size, heads_range, pruned=False):
+        d = data()
+        self.pruned = pruned  # True なら近似CPU(rank_pruned)を使う(検証用)
+        rs = random.Random(seed)
+        self.idx = rs.sample(range(d.nw), pool_size)
+        k = rs.randint(*heads_range)
+        heads = [d.head_idx[i] for i in rs.sample(range(len(HEADS)), k)]
+        self.Wp = d.W[self.idx]
+        total = self.Wp.sum(axis=0).astype(np.int16)
+        for h in heads:
+            total[h] += 1
+        self.total = total
+        wall = [t for t in range(d.T) for _ in range(total[t])]
+        rs.shuffle(wall)
+        self.wall = wall
+        # 完成形(4語+喘ぎ牌1枚)の全候補。行 = 候補、列 = 牌
+        self.combo = d.combos(pool_size)
+        S0 = self.Wp[self.combo].sum(axis=1).astype(np.int8)
+        rows = []
+        for h in heads:
+            s = S0.copy()
+            s[:, h] += 1
+            rows.append(s)
+        self.S = np.concatenate(rows)
+        self.row_combo = np.tile(np.arange(len(self.combo)), len(heads))
+        self.combo_mask = [sum(1 << self.idx[j] for j in c) for c in self.combo]
 
-    for turn in range(1, max_draws + 1):
-        if pos >= len(st.wall):
-            return ("noten",)
-        t = st.wall[pos]
-        pos += 1
-        hand[t] += 1
-        rem[t] -= 1
-        r = best_complete(st, hand)
-        if r:
-            return ("win", r[0], r[1], turn)
+    def best_complete(self, hand):
+        """手牌に完全に含まれる完成形のうち翻が最大のもの (翻, 役, 語のマスク)。なければNone。"""
+        d = data()
+        full = np.minimum(self.S, hand).sum(axis=1) == HAND
+        if not full.any():
+            return None
+        best = None
+        for ci in set(self.row_combo[full].tolist()):
+            r = d.eval_mask(self.combo_mask[ci])
+            if best is None or r[0] > best[0]:
+                best = (r[0], r[1], self.combo_mask[ci])
+        return best
 
+    def rank_discards(self, hand, rem, cpu, rc):
+        if self.pruned:
+            return rank_pruned(self.Wp, hand, rem, cpu, rc, data().head_idx)
+        S = self.S
         m14 = np.minimum(S, hand).sum(axis=1)
         if cpu == "strong":
             base = (np.clip(S - hand, 0, None) <= rem).all(axis=1)
@@ -333,34 +379,160 @@ def play_game(st, cpu, max_draws, cpu_seed):
             else:
                 key = (0, 0, rc.random())
             cands.append((key, c, h2))
-        key, c, h2 = max(cands, key=lambda x: x[0])
+        return cands
 
-        if turn == max_draws:
-            # テンパイ = 13枚のうち1枚を入れ替えれば完成し、その必要牌が山に残っている(必要牌は実際の残りで判定)
-            R = S[m14 >= HAND - 1]
-            ten_chosen = is_tenpai(R, h2, rem)
-            if not ten_chosen:
-                return ("noten",)
-            can_break = any(not is_tenpai(R, h, rem) for _, _, h in cands)
-            return ("tenpai", can_break)
+    def tenpai_checker(self, hand14, rem):
+        """ツモ直後の14枚から、捨てた後の13枚hがテンパイかを返す関数を作る。"""
+        m14 = np.minimum(self.S, hand14).sum(axis=1)
+        R = self.S[m14 >= HAND - 1]
+        return lambda h: is_tenpai(R, h, rem)
+
+
+def complete_words(hand):
+    """手牌に(枚数まで含めて)完全に入っている語の行index。"""
+    return np.nonzero((data().W <= hand).all(axis=1))[0]
+
+
+def find_complete(hand):
+    """全語から、手牌に完全に含まれる 4語+喘ぎ牌1枚 を探す(厳密)。翻最大の (翻, 役, マスク) かNone。"""
+    d = data()
+    if not hand[d.head_idx].any():
+        return None
+    comp = complete_words(hand)
+    if len(comp) < N_WORDS:
+        return None
+    combos = comp[d.combos(len(comp))]
+    ok = (d.W[combos].sum(axis=1) <= hand).all(axis=1)
+    best = None
+    for row in combos[ok]:
+        mask = sum(1 << int(i) for i in row)
+        r = d.eval_mask(mask)
+        if best is None or r[0] > best[0]:
+            best = (r[0], r[1], mask)
+    return best
+
+
+class FixedSetup:
+    """B: 全語入りの固定の山。毎ゲーム同じ構成をシャッフルするだけ。"""
+
+    _counts = None
+
+    def __init__(self, seed):
+        d = data()
+        if FixedSetup._counts is None:
+            FixedSetup._counts = fixed_wall_counts()[0]
+        self.total = FixedSetup._counts
+        rs = random.Random(seed)
+        wall = [t for t in range(d.T) for _ in range(int(self.total[t]))]
+        rs.shuffle(wall)
+        self.wall = wall
+
+    def best_complete(self, hand):
+        return find_complete(hand)
+
+    def rank_discards(self, hand, rem, cpu, rc):
+        d = data()
+        return rank_pruned(d.W, hand, rem, cpu, rc, d.head_idx)
+
+    def tenpai_checker(self, hand14, rem):
+        d = data()
+        head = np.array(d.head_idx)
+
+        def check(h13):
+            # 完成には、h13だけで完成している語が3語以上(枚数の取り合いで残り1語がw待ち)必要
+            if len(complete_words(h13)) < N_WORDS - 1:
+                return False
+            ws = np.nonzero(rem > 0)[0]
+            if not h13[head].any():
+                ws = np.intersect1d(ws, head)
+            for w in ws:
+                h = h13.copy()
+                h[w] += 1
+                if find_complete(h) is not None:
+                    return True
+            return False
+
+        return check
+
+
+def play_game(st, cpu, checkpoints, cpu_seed):
+    """checkpoints = ツモ回数の候補(例 (10, 14))。各ツモ回数で打ち切った場合の結果 {回数: 結果} を返す。
+    結果: ("win", 翻, 役index tuple, 巡目, 語のマスク) / ("tenpai", 崩せるか) / ("noten",)
+    同じ配牌・同じ山・同じ乱数なので、ツモ14回の途中経過がそのままツモ10回の結果になる。"""
+    d = data()
+    rc = random.Random(cpu_seed)
+    hand = np.zeros(d.T, dtype=np.int8)
+    rem = st.total.astype(np.int16)  # 山に残っている牌
+    for t in st.wall[:HAND]:
+        hand[t] += 1
+        rem[t] -= 1
+    pos = HAND
+    res = {}
+
+    r = st.best_complete(hand)
+    if r:
+        return {cp: ("win", r[0], r[1], 0, r[2]) for cp in checkpoints}
+
+    for turn in range(1, max(checkpoints) + 1):
+        if pos >= len(st.wall):
+            break
+        t = st.wall[pos]
+        pos += 1
+        hand[t] += 1
+        rem[t] -= 1
+        r = st.best_complete(hand)
+        if r:
+            for cp in checkpoints:
+                res.setdefault(cp, ("win", r[0], r[1], turn, r[2]))
+            return res
+        cands = st.rank_discards(hand, rem, cpu, rc)
+        _, _, h2 = max(cands, key=lambda x: x[0])
+        if turn in checkpoints:
+            # テンパイ = 13枚のうち1枚を入れ替えれば完成し、その必要牌が山に残っている
+            check = st.tenpai_checker(hand, rem)
+            if not check(h2):
+                res[turn] = ("noten",)
+            else:
+                res[turn] = ("tenpai", any(not check(h) for _, _, h in cands))
         hand = h2
-    return ("noten",)
+    for cp in checkpoints:
+        res.setdefault(cp, ("noten",))
+    return res
+
+
+def make_setup(wall, seed, pool_size, heads_range):
+    if wall == "A":
+        return Setup(seed, pool_size, heads_range)
+    if wall == "Ap":  # 14語プール + 近似CPU(近似の検証用)
+        return Setup(seed, pool_size, heads_range, pruned=True)
+    if wall == "B":
+        return FixedSetup(seed)
+    raise ValueError(wall)
 
 
 def _game_worker(args):
-    seeds, pool_size, max_draws, heads_range = args
+    seeds, pool_size, heads_range, checkpoints, walls = args
     out = []
     for g in seeds:
-        st = Setup(g, pool_size, heads_range)
-        out.append(tuple(play_game(st, cpu, max_draws, g ^ 0x9E3779B1) for cpu in CPUS))
-    data()._eval_cache.clear() if len(data()._eval_cache) > 1_500_000 else None
+        rec = {}
+        for wall in walls:
+            st = make_setup(wall, g, pool_size, heads_range)
+            for cpu in CPUS:
+                res = play_game(st, cpu, checkpoints, g ^ 0x9E3779B1)
+                for cp, r in res.items():
+                    rec[(wall, cpu, cp)] = r
+        out.append(rec)
+    dd = data()
+    if len(dd._eval_cache) > 1_500_000:
+        dd._eval_cache.clear()
     return out
 
 
-def run_batch(seed_start, n, pool_size, max_draws, heads_range, procs):
+def run_batch(seed_start, n, pool_size, heads_range, checkpoints, walls, procs):
     seeds = list(range(seed_start, seed_start + n))
-    chunks = [seeds[i::procs * 4] for i in range(procs * 4)]
-    jobs = [(c, pool_size, max_draws, heads_range) for c in chunks if c]
+    k = procs * 4
+    chunks = [seeds[i::k] for i in range(k)]
+    jobs = [(c, pool_size, heads_range, checkpoints, walls) for c in chunks if c]
     if procs > 1:
         with ProcPool(procs) as p:
             parts = p.map(_game_worker, jobs)
@@ -370,8 +542,13 @@ def run_batch(seed_start, n, pool_size, max_draws, heads_range, procs):
     ordered = [None] * n
     for ci, part in zip([i for i, c in enumerate(chunks) if c], parts):
         for j, g in enumerate(part):
-            ordered[ci + j * (procs * 4)] = g
+            ordered[ci + j * k] = g
     return ordered
+
+
+def view(games, wall, cp):
+    """条件(山の作りとツモ回数)ごとに、[(強CPUの結果, 弱CPUの結果)] を取り出す。"""
+    return [tuple(g[(wall, cpu, cp)] for cpu in CPUS) for g in games]
 
 
 def ci_halfwidth(k, n):
@@ -379,20 +556,23 @@ def ci_halfwidth(k, n):
     return 1.96 * math.sqrt(max(p * (1 - p), 1e-12) / n)
 
 
-def collect(args, heads_range):
+def collect(args, heads_range, walls, checkpoints, kinds=("win", "tenpai", "noten")):
+    """誤差幅(アガリ率など)が目標以下になるまで、5000ゲームずつ増やす。シードは固定(連番)。"""
     games = []
     seed = args.seed * 1_000_003
     while True:
         n = args.games if args.games else args.batch
-        games += run_batch(seed + len(games), n, args.pool_size, args.max_draws, heads_range, args.procs)
+        games += run_batch(seed + len(games), n, args.pool_size, heads_range, checkpoints, walls, args.procs)
         if args.games:
             return games
         G = len(games)
         worst = 0.0
-        for ci in range(len(CPUS)):
-            for kind in ("win", "tenpai", "noten"):
-                k = sum(g[ci][0] == kind for g in games)
-                worst = max(worst, ci_halfwidth(k, G))
+        for wall in walls:
+            for cp in checkpoints:
+                for cpu in CPUS:
+                    for kind in kinds:
+                        k = sum(g[(wall, cpu, cp)][0] == kind for g in games)
+                        worst = max(worst, ci_halfwidth(k, G))
         print(f"  ... {G}ゲーム: 最大の95%誤差幅 ±{worst * 100:.2f}pt", flush=True)
         if (G >= args.min_games and worst <= args.ci) or G >= args.max_games:
             return games
@@ -413,6 +593,7 @@ def summarize(games, ci):
         "han_hist": Counter(r[1] for r in wins),
         "turn_hist": Counter(r[3] for r in wins),
         "yaku": Counter(i for r in wins for i in r[2]),
+        "word": Counter(i for r in wins for i in range(data().nw) if r[4] >> i & 1),
         "avg_han": sum(r[1] for r in wins) / len(wins) if wins else 0.0,
         "avg_turn": sum(r[3] for r in wins) / len(wins) if wins else 0.0,
     }
@@ -626,7 +807,7 @@ def main():
         print("役の数え上げ(4語の全組み合わせ)...", flush=True)
         enum = enumerate_yaku(args.procs)
     print("ゲームのシミュレーション...", flush=True)
-    games = collect(args, heads_range)
+    games = view(collect(args, heads_range, ("A",), (args.max_draws,)), "A", args.max_draws)
     print()
     sums = print_game_report(args, games, heads_range)
     print_yaku_report(args, sums, enum, args.out)
