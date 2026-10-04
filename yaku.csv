@@ -1,0 +1,17 @@
+﻿id,name,kind,group,condition_type,params,han_provisional,description
+Y001,同じ修飾牌・二,汎用,same_modifier,count_same_modifier,2,1,同じ修飾牌を使う語が2語
+Y002,同じ修飾牌・三,汎用,same_modifier,count_same_modifier,3,2,同じ修飾牌を使う語が3語
+Y003,同じ修飾牌・四,汎用,same_modifier,count_same_modifier,4,3,同じ修飾牌を使う語が4語
+Y004,同じ語幹・二,汎用,same_stem,count_same_stem,2,1,同じ語幹の語が2語
+Y005,同じ語幹・三,汎用,same_stem,count_same_stem,3,2,同じ語幹の語が3語
+Y006,同じ語幹・四,汎用,same_stem,count_same_stem,4,3,同じ語幹の語が4語
+Y007,素の言葉,汎用,,singles_eq,4,2,修飾牌なしの単独語だけで4語
+Y008,修飾づくし,汎用,,singles_eq,0,1,単独語ゼロ(4語すべて修飾牌付きか組合せ型)
+Y009,語尾そろい,汎用,,count_tail_modifier,3,1,語尾牌(穴・媚)を使う語が3語以上
+Y010,キスの雨,汎用,,count_in_set,min=2;set=ちゅっちゅ|べろちゅ|きっす,2,キス系の語が2語以上
+Y011,絶頂そろい,汎用,,count_in_set,min=2;set=いくっ|あくめ|しゃせい,2,絶頂系の語が2語以上
+Y012,同じ部位,汎用,,count_same_part,3,2,同じ部位(男性器/女性器/後ろ/胸)の語が3語以上。SMは除く
+Y013,本番,名指し,,contains_all,ちんぽ|まんこ,2,ちんぽとまんこが両方入る
+Y014,ダブル奉仕,名指し,,pair_same_stem_modifiers,手|舐,2,手X+舐X(同じ語幹X)が両方入る。例: 手ちん+舐ちん、手まん+舐まん
+Y015,主従,名指し,,contains_all,まぞ穴|さど穴/まぞ媚|さど媚,2,まぞ穴+さど穴、またはまぞ媚+さど媚。/はOR、|はAND
+Y016,前も後ろも,名指し,,contains_all,まんこ|あなる,2,まんことあなるが両方入る
