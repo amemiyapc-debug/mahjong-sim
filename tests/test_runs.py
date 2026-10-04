@@ -11,7 +11,8 @@ class Fake:
 
 def run(seq, pad, games, policy=None, N=8):
     np.random.default_rng = lambda seed: Fake(seq + [pad] * 40)
-    return sim.simulate_runs(games, 0, [N], [4000, 5000], policy, 500, 4, 3, 1)
+    out = sim.simulate_runs(games, 0, [N], [4000, 5000], policy, 500, 4, 3, 1)
+    return {k: v[:3] for k, v in out.items()}  # (クリア, バースト, 焦らし)。4番目は総ツモ数
 
 WIN = ("win", 3, (), 0); TP = ("tenpai", False); TPB = ("tenpai", True); NO = ("noten",)
 g = [(WIN,) * 2, (TP,) * 2, (NO,) * 2]   # 0:win(3翻) 1:tenpai 2:noten

@@ -457,10 +457,13 @@ class FixedSetup:
         return check
 
 
-def play_game(st, cpu, checkpoints, cpu_seed):
+def play_game(st, cpu, checkpoints, cpu_seed, trace=False):
     """checkpoints = ツモ回数の候補(例 (10, 14))。各ツモ回数で打ち切った場合の結果 {回数: 結果} を返す。
     結果: ("win", 翻, 役index tuple, 巡目, 語のマスク) / ("tenpai", 崩せるか) / ("noten",)
-    同じ配牌・同じ山・同じ乱数なので、ツモ14回の途中経過がそのままツモ10回の結果になる。"""
+    捨て方はツモの上限を見ない(残りツモ回数に依存しない)ので、同じ配牌・同じ山・同じ乱数なら、
+    上限20の1回のプレイが、上限6〜20のどの結果にもなる。
+    trace=True なら res["trace"] = (アガリ巡目 or -1, テンパイ以上ビット列) も返す。
+    ビット列の第t bit = 巡目tの捨て牌の後の13枚がテンパイ(アガリ済みなら立てない。t=0は配牌)。"""
     d = data()
     rc = random.Random(cpu_seed)
     hand = np.zeros(d.T, dtype=np.int8)
@@ -470,11 +473,18 @@ def play_game(st, cpu, checkpoints, cpu_seed):
         rem[t] -= 1
     pos = HAND
     res = {}
+    tmask = 0
 
     r = st.best_complete(hand)
     if r:
-        return {cp: ("win", r[0], r[1], 0, r[2]) for cp in checkpoints}
+        out = {cp: ("win", r[0], r[1], 0, r[2]) for cp in checkpoints}
+        if trace:
+            out["trace"] = (0, 0)
+        return out
+    if trace and st.tenpai_checker(hand, rem)(hand):
+        tmask |= 1
 
+    win_turn = -1
     for turn in range(1, max(checkpoints) + 1):
         if pos >= len(st.wall):
             break
@@ -486,19 +496,22 @@ def play_game(st, cpu, checkpoints, cpu_seed):
         if r:
             for cp in checkpoints:
                 res.setdefault(cp, ("win", r[0], r[1], turn, r[2]))
-            return res
+            win_turn = turn
+            break
         cands = st.rank_discards(hand, rem, cpu, rc)
         _, _, h2 = max(cands, key=lambda x: x[0])
-        if turn in checkpoints:
-            # テンパイ = 13枚のうち1枚を入れ替えれば完成し、その必要牌が山に残っている
+        if turn in checkpoints or trace:
             check = st.tenpai_checker(hand, rem)
-            if not check(h2):
-                res[turn] = ("noten",)
-            else:
-                res[turn] = ("tenpai", any(not check(h) for _, _, h in cands))
+            ten = check(h2)  # テンパイ = 13枚のうち1枚を入れ替えれば完成し、その必要牌が山に残っている
+            if trace and ten:
+                tmask |= 1 << turn
+            if turn in checkpoints:
+                res[turn] = ("tenpai", any(not check(h) for _, _, h in cands)) if ten else ("noten",)
         hand = h2
     for cp in checkpoints:
         res.setdefault(cp, ("noten",))
+    if trace:
+        res["trace"] = (win_turn, tmask)
     return res
 
 
@@ -513,14 +526,14 @@ def make_setup(wall, seed, pool_size, heads_range):
 
 
 def _game_worker(args):
-    seeds, pool_size, heads_range, checkpoints, walls = args
+    seeds, pool_size, heads_range, checkpoints, walls, trace = args
     out = []
     for g in seeds:
         rec = {}
         for wall in walls:
             st = make_setup(wall, g, pool_size, heads_range)
             for cpu in CPUS:
-                res = play_game(st, cpu, checkpoints, g ^ 0x9E3779B1)
+                res = play_game(st, cpu, checkpoints, g ^ 0x9E3779B1, trace)
                 for cp, r in res.items():
                     rec[(wall, cpu, cp)] = r
         out.append(rec)
@@ -530,11 +543,11 @@ def _game_worker(args):
     return out
 
 
-def run_batch(seed_start, n, pool_size, heads_range, checkpoints, walls, procs):
+def run_batch(seed_start, n, pool_size, heads_range, checkpoints, walls, procs, trace=False):
     seeds = list(range(seed_start, seed_start + n))
     k = procs * 4
     chunks = [seeds[i::k] for i in range(k)]
-    jobs = [(c, pool_size, heads_range, checkpoints, walls) for c in chunks if c]
+    jobs = [(c, pool_size, heads_range, checkpoints, walls, trace) for c in chunks if c]
     if procs > 1:
         with ProcPool(procs) as p:
             parts = p.map(_game_worker, jobs)
@@ -558,13 +571,13 @@ def ci_halfwidth(k, n):
     return 1.96 * math.sqrt(max(p * (1 - p), 1e-12) / n)
 
 
-def collect(args, heads_range, walls, checkpoints, kinds=("win", "tenpai", "noten")):
+def collect(args, heads_range, walls, checkpoints, kinds=("win", "tenpai", "noten"), trace=False):
     """誤差幅(アガリ率など)が目標以下になるまで、5000ゲームずつ増やす。シードは固定(連番)。"""
     games = []
     seed = args.seed * 1_000_003
     while True:
         n = args.games if args.games else args.batch
-        games += run_batch(seed + len(games), n, args.pool_size, heads_range, checkpoints, walls, args.procs)
+        games += run_batch(seed + len(games), n, args.pool_size, heads_range, checkpoints, walls, args.procs, trace)
         if args.games:
             return games
         G = len(games)
@@ -684,7 +697,7 @@ def print_yaku_report(args, sums, enum, outdir):
 
 
 # ---------------------------------------------------------------- 3. 1ラン
-def simulate_runs(games, ci, n_range, targets, policy, pile_point, burst_at, runs, seed):
+def simulate_runs(games, ci, n_range, targets, policy, pile_point, burst_at, runs, seed, limit=None):
     """ゲームは独立なので結果を再抽選して1ランを再現する。
     policy: None=テンパイを崩せない / K=連続数がK回目になるテンパイを崩す(崩せるとき)。"""
     rng = np.random.default_rng(seed)
@@ -692,6 +705,8 @@ def simulate_runs(games, ci, n_range, targets, policy, pile_point, burst_at, run
     kind = np.array([0 if r[0] == "win" else 1 if r[0] == "tenpai" else 2 for r in res])
     score = np.array([r[1] * ARGS.han_point if r[0] == "win" else 0 for r in res], dtype=np.int64)
     can_break = np.array([r[0] == "tenpai" and r[1] for r in res])
+    # そのゲームで引いたツモ数(アガリはアガリ巡目、それ以外は上限まで引く)
+    draws = np.array([r[3] if r[0] == "win" else (limit or 0) for r in res], dtype=np.int64)
     nmax = max(n_range)
     G = len(res)
 
@@ -704,6 +719,8 @@ def simulate_runs(games, ci, n_range, targets, policy, pile_point, burst_at, run
     r3_cum = np.zeros(runs, dtype=np.int64)
     burst_used = np.full(runs, -1, dtype=np.int32)
     cum_at = np.zeros((nmax + 1, runs), dtype=np.int64)
+    dr = np.zeros(runs, dtype=np.int64)  # 累計ツモ数(テンパイ流局のやり直しも含む)
+    dr_at = np.zeros((nmax + 1, runs), dtype=np.int64)
 
     while True:
         act = alive & (used < nmax)
@@ -711,6 +728,7 @@ def simulate_runs(games, ci, n_range, targets, policy, pile_point, burst_at, run
             break
         gi = rng.integers(0, G, size=runs)
         k, s, cb = kind[gi], score[gi], can_break[gi]
+        dr[act] += draws[gi][act]
         is_win = act & (k == 0)
         is_noten = act & (k == 2)
         is_tp = act & (k == 1)
@@ -725,6 +743,7 @@ def simulate_runs(games, ci, n_range, targets, policy, pile_point, burst_at, run
         used[reset] += 1
         idx = np.nonzero(reset)[0]
         cum_at[used[idx], idx] = cum[idx]
+        dr_at[used[idx], idx] = dr[idx]
         streak[is_tp] += 1
         pile[is_tp] += pile_point
         new3 = is_tp & (streak >= 3) & (r3_used < 0)
@@ -736,6 +755,7 @@ def simulate_runs(games, ci, n_range, targets, policy, pile_point, burst_at, run
     for kk in range(1, nmax + 1):  # バーストで止まったランは、そこまでの得点で固定
         m = used < kk
         cum_at[kk][m] = cum[m]
+        dr_at[kk][m] = dr[m]
 
     out = {}
     for N in n_range:
@@ -743,7 +763,12 @@ def simulate_runs(games, ci, n_range, targets, policy, pile_point, burst_at, run
             clear = (cum_at[N] >= T).mean()
             burst = ((burst_used >= 0) & (burst_used < N) & (cum < T)).mean()
             r3 = ((r3_used >= 0) & (r3_used < N) & (r3_cum < T)).mean()
-            out[(N, T)] = (float(clear), float(burst), float(r3))
+            # 1ランの総ツモ数: クリアしたらその時点まで、しなければバーストまたはN消費まで
+            ok = cum_at[1:N + 1] >= T
+            cleared = ok.any(axis=0)
+            first = ok.argmax(axis=0) + 1
+            end = np.where(cleared, dr_at[first, np.arange(runs)], dr_at[N])
+            out[(N, T)] = (float(clear), float(burst), float(r3), float(end.mean()))
     return out
 
 
