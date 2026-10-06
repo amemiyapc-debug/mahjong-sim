@@ -345,9 +345,9 @@ class Game:
 _G = None
 
 
-def _init(d, rule, L, cpu):
+def _init(d, rule, L, cpu, modx=0.1, x2=13):
     global _G
-    _G = Game(d, tile_copies(d, rule), L, cpu=cpu)
+    _G = Game(d, tile_copies(d, rule, modx, x2), L, cpu=cpu)
 
 
 def _run(args):
@@ -358,10 +358,10 @@ def _run(args):
     return out
 
 
-def run_games(d, rule, L, n, seed, procs, cpu):
+def run_games(d, rule, L, n, seed, procs, cpu, modx=0.1, x2=13):
     chunk = max(1, min(25, n // (procs * 4) or 1))
     jobs = [(seed + i, min(chunk, n - i)) for i in range(0, n, chunk)]
-    with Pool(procs, initializer=_init, initargs=(d, rule, L, cpu)) as p:
+    with Pool(procs, initializer=_init, initargs=(d, rule, L, cpu, modx, x2)) as p:
         res = []
         for part in p.imap(_run, jobs):
             res += part
