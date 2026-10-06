@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ひらがな麻雀(仮) テストプレイ版</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#eef1ed; --panel:#fafcf9; --ink:#1d2a25; --muted:#5a6a63; --line:#c9d4cd;
+  --tile:#ffffff; --edge:#26332d; --head:#2c7a62; --tail:#8a4a78; --aegi:#fbe3ea; --sel:#d4781c; --good:#2c7a62; --tatsu:#9ccab9; --warn:#b0432f;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131a17; --panel:#1a2420; --ink:#e6eee9; --muted:#97a69e; --line:#2c3b35;
+    --tile:#e9efe6; --edge:#0b100e; --head:#58c4a0; --tail:#d08cc0; --aegi:#f3c9d6; --sel:#f0a24a; --good:#58c4a0; --tatsu:#3f7d69; --warn:#e07b66;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131a17; --panel:#1a2420; --ink:#e6eee9; --muted:#97a69e; --line:#2c3b35;
+  --tile:#e9efe6; --edge:#0b100e; --head:#58c4a0; --tail:#d08cc0; --aegi:#f3c9d6; --sel:#f0a24a; --good:#58c4a0; --tatsu:#3f7d69; --warn:#e07b66;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans JP","Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;font-size:15px;line-height:1.6}
+main{max-width:560px;margin:0 auto;padding:12px 12px 40px}
+h1{font-size:1.05rem;margin:4px 0 8px;font-weight:900}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+#status{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 10px;font-size:.88rem}
+#status b{font-weight:900}
+#status .wide{grid-column:1/-1}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:2px}
+.bar>i{display:block;height:100%;background:var(--good)}
+#msg{min-height:1.6em;margin:2px 0 8px;color:var(--muted);font-size:.9rem}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end}
+.label{font-size:.78rem;color:var(--muted);margin:6px 0 2px}
+/* 牌の大きさ: 14牌+グループ+ツモ牌のすき間が、1行に収まる幅(390pxで約21.9px。広い画面は最大44px) */
+:root{--tw:min(44px,calc((min(100vw,560px) - 84px)/14));--th:calc(var(--tw)*1.4)}
+.tile{position:relative;width:var(--tw);height:var(--th);border:1.5px solid var(--edge);border-bottom-width:calc(var(--tw)*.1);border-radius:calc(var(--tw)*.11);background:var(--tile);color:#1b231f;
+  font-family:inherit;font-weight:900;padding:0;cursor:pointer;flex:none;-webkit-tap-highlight-color:transparent;overflow:hidden}
+.tile .one{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:calc(var(--tw)*.64)}
+.tile .a{position:absolute;left:6%;top:0;font-size:calc(var(--tw)*.54);line-height:1.15}
+.tile .b{position:absolute;right:6%;bottom:2%;font-size:calc(var(--tw)*.46);line-height:1.15}
+.tile .b.sm{font-size:calc(var(--tw)*.35)}
+.tile.k-head{border-bottom-color:var(--head)} .tile.k-tail{border-bottom-color:var(--tail)} .tile.k-aegi{background:var(--aegi);border-bottom-color:#c4577a}
+.tile.sel{transform:translateY(calc(var(--th)*-.22));outline:2px solid var(--sel);outline-offset:0}
+.tile.hint{outline:3px dashed var(--sel);outline-offset:1px}
+.tile.drawn{margin-left:calc(var(--tw)*.35)}
+.tile.mini{width:30px;height:42px;cursor:default;--tw:30px}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+button.btn{font:inherit;font-weight:900;padding:9px 16px;border-radius:8px;border:2px solid var(--edge);background:var(--panel);color:var(--ink);cursor:pointer}
+button.btn.primary{background:var(--good);color:#fff;border-color:var(--good)}
+button.btn:disabled{opacity:.35;cursor:default}
+button.btn:focus-visible,.tile:focus-visible{outline:3px solid var(--sel);outline-offset:2px}
+details{margin-bottom:8px} summary{cursor:pointer;font-weight:900;padding:4px 0}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:1px 9px;font-size:.84rem}
+.chip.done{background:var(--good);color:#fff;border-color:var(--good)}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
+#modal[hidden]{display:none}
+#modal .card{background:var(--panel);border-radius:12px;padding:16px;max-width:460px;width:100%;max-height:88vh;overflow:auto;border:2px solid var(--edge)}
+#modal h2{margin:0 0 8px;font-size:1.1rem}
+.yk{display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding:2px 0}
+.big{font-size:1.3rem;font-weight:900}
+.settings label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:5px 0}
+.settings input,.settings select{font:inherit;padding:3px 6px;width:7.5em;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+small{color:var(--muted)}
+.tile.k-oho{border-bottom-color:#c4577a;background:#fff3f6}
+.tile .oho1{position:absolute;left:50%;bottom:8%;transform:translateX(-50%);font-size:calc(var(--tw)*.58);line-height:1}
+.tile .oho2{position:absolute;right:8%;top:5%;font-size:calc(var(--tw)*.46);line-height:1}
+
+.chip.gray{opacity:.5;cursor:default}
+.chip.gray small{margin-left:3px}
+
+.btns.small{margin:8px 0 2px}.btns.small .btn{padding:6px 12px;font-weight:700}
+.btn[aria-pressed="true"]{background:var(--sel);color:#fff;border-color:var(--sel)}
+.tile.glow{background:#fff1a8}
+.tile.comp{background:#ffd9a0;outline:2px solid var(--sel);outline-offset:0}
+/* 手牌: 1行。組んだ牌は、グループごとに牌半枚ぶん前(上)へずらし、下線とラベルを付ける */
+#hand{display:flex;flex-wrap:nowrap;align-items:flex-end;gap:1px;padding-top:calc(var(--th)*.3);min-height:calc(var(--th)*1.6)}
+.grp{position:relative;display:flex;gap:1px;flex:none;margin:0 2px;padding-bottom:calc(var(--th)*.5);border-bottom:2px dashed var(--good);min-width:0}
+.grp.meld{border-bottom-color:var(--good)} .grp.head{border-bottom-color:#d4781c} .grp.tatsu{border-bottom-color:#3b78c4}
+.grp>.gl{position:absolute;left:0;right:0;bottom:0;height:calc(var(--th)*.5);line-height:calc(var(--th)*.5);text-align:center;font-size:max(9px,calc(var(--tw)*.4));font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink);pointer-events:none}
+.grp.meld>.gl{color:var(--good)} .grp.head>.gl{color:#b35f0f} .grp.tatsu>.gl{color:#2f62a5}
+.grp .tile{cursor:pointer}
+#handPanel{padding:8px 6px}
+#menu{margin-top:6px} #menu .btn{padding:6px 10px;font-size:.88rem;font-weight:700}
+#selBar{min-height:2.2em;margin:4px 0;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:.86rem}
+#selBar .btn{padding:5px 10px;font-size:.86rem}
+#compBar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:2px 0;font-size:.86rem}
+#compBar .btn{padding:4px 10px;font-size:.84rem;border-color:var(--sel)}
+#hintPanel .sec{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin:6px 0;font-size:.86rem}
+#hintPanel .sec>b{display:block;margin-bottom:3px}
+.cand{display:inline-flex;align-items:center;gap:4px;margin:2px 3px 2px 0}
+.cand .btn{padding:3px 9px;font-size:.84rem;font-weight:700}
+.cand .nav{font-size:.76rem;color:var(--good)}
+.cand .info{border:1px solid var(--line);border-radius:50%;width:1.6em;height:1.6em;line-height:1.4em;text-align:center;font-size:.78rem;padding:0;background:var(--panel);color:var(--ink);cursor:pointer}
+.yk2{display:inline-block;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:0 8px;margin:2px 3px 2px 0;font-size:.82rem}
+.yk2.new{border-color:var(--sel);color:#9a5410}
+.infoBox{border-top:1px dashed var(--line);margin-top:4px;padding-top:4px}
+.rlay{display:flex;flex-wrap:wrap;align-items:flex-end;gap:2px;margin:6px 0 2px;--tw:22px;--th:31px}
+.rlay .tile{width:22px;height:31px;cursor:default}
+.rlay .tile .one{font-size:14px}.rlay .tile .a{font-size:12px}.rlay .tile .b{font-size:10px}.rlay .tile .b.sm{font-size:8px}.rlay .tile .oho1{font-size:13px}.rlay .tile .oho2{font-size:10px}
+.rlay .grp .gl{font-size:10px}
+</style>
+</head>
+<body>
+<main>
+  <h1>ひらがな麻雀(仮) テストプレイ版</h1>
+  <div id="status" class="panel"></div>
+  <div id="msg"></div>
+  <div class="panel" id="handPanel">
+    <div class="label">手牌(3枚タップで語。2枚タップで雀頭・搭子。組んだ牌をタップで解除)</div>
+    <div id="hand"></div>
+    <div id="compBar"></div>
+    <div id="menu" class="btns small">
+      <button class="btn" id="bHint" aria-pressed="false">ヒント: オフ</button>
+      <button class="btn" id="bSort">整理</button>
+      <button class="btn" id="bUngroup">全部ほどく</button>
+    </div>
+    <div id="selBar"></div>
+    <div class="btns">
+      <button class="btn" id="bDiscard" disabled>この牌を捨てる</button>
+      <button class="btn primary" id="bWin" disabled>アガる</button>
+    </div>
+    <div id="hintPanel"></div>
+  </div>
+  <details class="panel"><summary>捨て牌</summary><div id="discards" class="row"></div></details>
+  <details class="panel"><summary>図鑑(この端末で成立した役)</summary><div id="zukan"></div></details>
+  <details class="panel settings"><summary>設定(変えると最初からになります)</summary>
+    <label>ツモ上限<input id="sL" type="number" min="6" max="20"></label>
+    <label>1ステージのゲーム数 N<input id="sN" type="number" min="2" max="10"></label>
+    <label>初期目標(点)<input id="sI" type="number" min="500" max="10000" step="500"></label>
+    <label>目標の倍率<input id="sM" type="number" min="1" max="2.5" step="0.1"></label>
+    <label>点の表<select id="sT"><option value="m">満貫制</option><option value="x">翻×1,000</option></select></label>
+    <div class="btns"><button class="btn" id="bApply">この設定で最初から</button></div>
+  </details>
+</main>
+<div id="modal" hidden><div class="card" id="card"></div></div>
+<script>
+const DATA=__DATA__;
+</script>
+<script>
+__CORE__
+</script>
+<script>
+__UI__
+</script>
+</body>
+</html>
