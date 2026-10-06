@@ -252,12 +252,13 @@ function setup(data){
 
   // 山の枚数。options.tileRule: "new"(v1.3m: min(10,max(2,ceil(使う語・雀頭の数/2))) + 修飾牌は修飾3型の需要の10%(四捨五入))/ "old"(max(4,使う語・雀頭の数))
   // 使う語の数には、修飾3型を数えない(options.triplesOutOfDeckRule)。ぉ゛は variants の枚数(4枚固定)。
-  const OPT=data.options||{}, RULE=OPT.tileRule||"old";
+  const OPT=data.options||{}, RULE=OPT.tileRule||"old", MODX=OPT.modx!=null?+OPT.modx:0.1;
   const inRule=w=>!(OPT.triplesOutOfDeckRule&&w.type==="修飾3型");
   const used={}, demand={}; W.forEach(w=>{ if(inRule(w)) w.rawKinds.forEach(t=>used[t]=(used[t]||0)+1); if(w.type==="修飾3型") w.tiles.forEach(t=>demand[t]=(demand[t]||0)+1); });
   H.forEach(h=>h.rawKinds.forEach(t=>used[t]=(used[t]||0)+1));
   const deckCounts={}; Object.keys(used).forEach(t=>{
-    deckCounts[t]= RULE==="new" ? Math.min(10,Math.max(2,Math.ceil(used[t]/2)))+(MOD_ORDER.includes(t)?Math.floor((demand[t]||0)*0.1+0.5):0) : Math.max(4,used[t]); });
+    deckCounts[t]= RULE==="new" ? Math.min(10,Math.max(2,Math.ceil(used[t]/2)))+(MOD_ORDER.includes(t)?Math.floor((demand[t]||0)*MODX+0.5):0) : Math.max(4,used[t]); });
+  Object.keys(OPT.fixed||{}).forEach(t=>{ if(t in deckCounts) deckCounts[t]=+OPT.fixed[t]; });   // 枚数を固定する牌(dan5: ×2)
   function buildDeck(){ const d=[]; Object.keys(deckCounts).forEach(t=>{ for(let k=0;k<deckCounts[t];k++) d.push(t); }); (data.variants||[]).forEach(v=>{ for(let k=0;k<(+v.copies);k++) d.push(v.tile); }); return d; }
 
   // 14枚の、すべての分け方(別々の4語 + 雀頭1つ)。変種(ぉ゛・っ・ちゅ)は handVariants に従う。同じ(4語,雀頭)は1つにまとめる。limit 通りまで

@@ -1,6 +1,6 @@
 const fs=require("fs"); const HM=require("./core.js");
 const G=HM.setup(JSON.parse(fs.readFileSync("data.json","utf8")));
-const isA=HM.isAegi;
+const isA=()=>false;   // v1.3c 以降、雀頭は2牌の語で、喘ぎ牌はない(旧版の HM.isAegi は、なくなった)
 // 牌効率のヒント: ①完成している語(面子) ②あと1枚の語(搭子) を選び、③どれにも使わない余りの牌から切る
 function cpu3(hand14,wall,rng,info){
   const c={}; let heads=0; hand14.forEach(t=>{ if(isA(t)) heads++; else c[t]=(c[t]||0)+1; });
@@ -26,7 +26,7 @@ function cpu3(hand14,wall,rng,info){
   if(best) best.sel.forEach(x=>{ for(const t of x.w.kinds){ rest[t]-=x.take[t]; } });
   const left=[]; for(const t in rest) for(let i=0;i<rest[t];i++) left.push(t);
   let headLeft=heads; if(heads>=1) headLeft=heads-1; for(let i=0;i<headLeft;i++) left.push(hand14.find(isA));
-  if(left.length===0) return G.cpuChoose(hand14,rng);
+  if(left.length===0) return hand14[Math.floor(rng()*hand14.length)];   // (旧版: G.cpuChoose。なくなったので、ランダムに切る)
   // 余りのうち、ほかの牌とつながる語が少ない牌から切る(孤立牌から切る)
   const pot=t=>{ if(isA(t)) return -1; let p=0; for(const w of G.W){ if(!(t in w.need)) continue; let other=0; for(const u of w.kinds){ if(u===t) continue; other+=Math.min(c[u]||0,w.need[u]); } if(other>=1) p++; } return p; };
   let bp=1e9,bt=[]; new Set(left).forEach(t=>{ const p=pot(t); if(p<bp){bp=p;bt=[t];} else if(p===bp) bt.push(t); });

@@ -17,8 +17,9 @@ from handgen import make_gen
 ap = argparse.ArgumentParser()
 ap.add_argument("--n", type=int, default=6000)
 ap.add_argument("--seed", type=int, default=20261010)
+ap.add_argument("--dir", default="v13m", help="辞書のフォルダ(リポジトリ直下からの相対。v13m か dan5)")
 a = ap.parse_args()
-D = os.path.join(ROOT, "v13m"); GAME = os.path.join(ROOT, "game")
+D = os.path.join(ROOT, a.dir); GAME = os.path.join(ROOT, "game")
 S = Scorer(D); rng = random.Random(a.seed)
 hk = lambda hi: "|".join(sorted(S.judge.replace.get(t, t) for t in S.H[hi]["tiles"].split("|")))   # 同じ牌の雀頭(あん/んあ)は同じ
 ng = 0

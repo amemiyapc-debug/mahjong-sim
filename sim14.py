@@ -53,8 +53,9 @@ def tile_usage(d):
     return used, demand
 
 
-def tile_copies(d, rule="new"):
-    """牌 -> 枚数(ぉ゛を含む)。rule: 'new'(v1.3m)/ 'old'(v1.3〜v1.3l)。"""
+def tile_copies(d, rule="new", modx=0.1, x2=13):
+    """牌 -> 枚数(ぉ゛を含む)。rule: 'new'(v1.3m)/ 'old'(v1.3〜v1.3l)。
+    modx: 修飾牌に足す、前置き(修飾3型)の需要の割合(既定0.1)。x2: 新しい牌 ×2 の枚数(dan5。辞書に ×2 があるときだけ。既定13)。"""
     used, demand = tile_usage(d)
     V = read_rows(os.path.join(d, "tile_variants.csv"))
     copies = {}
@@ -62,12 +63,13 @@ def tile_copies(d, rule="new"):
         if rule == "new":
             c = min(10, max(2, math.ceil(u / 2)))
             if t in MOD_TILES:
-                c += int(demand[t] * 0.1 + 0.5)       # 四捨五入(0.5は切り上げ)
+                c += int(demand[t] * modx + 0.5)      # 四捨五入(0.5は切り上げ)
         elif rule == "old":
             c = max(4, u)
         else:
             raise ValueError(rule)
         copies[t] = c
+        if t == "×2": copies[t] = x2                # ×2 は、枚数を固定(dan5)
     for v in V:
         if int(v["copies"]) > 0:
             copies[v["tile"]] = int(v["copies"])        # ぉ゛ 4枚(固定)

@@ -221,7 +221,7 @@ function computeHints(){
   const cands=st.done.map(n=>G.idx[n]).filter(w=>!built.has(w)).map(w=>({w,gain:G.gainBy(mw,ho,w)}));
   cands.sort((a,b)=>((b.gain[0]?b.gain[0].han:-1)-(a.gain[0]?a.gain[0].han:-1))||(a.w-b.w));
   const heads=hg?[]:G.headStatus(Us,wc).done.map(n=>G.hidx[n]);
-  const tatsu=st.one.filter(o=>!built.has(G.idx[o.word])).slice(0,16);
+  const tatsu=st.one.filter(o=>!built.has(G.idx[o.word])&&o.left>0).slice(0,16);   // 待ち牌が山に残っているものだけ(山の残りが多い順)
   // 完成牌: 組んだ搭子 + 組んでいない牌1枚で、語になる
   const comps=[]; groupsOf("tatsu").forEach(g=>{ const tt=game.tiles.filter(x=>x.g===g.id).map(x=>x.t);
     U.forEach(x=>{ G.matchWords(tt.concat([x.t])).forEach(m=>{ if(!built.has(m.w)) comps.push({gid:g.id,tile:x,w:m.w}); }); }); });

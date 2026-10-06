@@ -33,7 +33,8 @@ def make_gen(S, rng, variants=True):
         if variants:
             t = [("ぉ゛" if x == "お" and rng.random() < 0.3 else x) for x in t]
             t = [("っ" if x == "つ" and rng.random() < 0.3 else x) for x in t]
-            t = [("ちゅ" if x in ("つ", "っ") and rng.random() < 0.2 else x) for x in t]
+            if S.judge.flex:   # ちゅ→つ(一方向)の代用があるときだけ(dan5 では廃止)
+                t = [("ちゅ" if x in ("つ", "っ") and rng.random() < 0.2 else x) for x in t]
         rng.shuffle(t)
         return t
 

@@ -1,13 +1,10 @@
-const fs=require("fs"); const HM=require("./core.js");
-const data=JSON.parse(fs.readFileSync("data.json","utf8")); const G=HM.setup(data);
-const n=G.W.length; const cntBy={}; let total=0, none=0; const t0=Date.now();
-for(let a=0;a<n;a++)for(let b=a+1;b<n;b++)for(let c=b+1;c<n;c++)for(let d=c+1;d<n;d++){
-  const r=G.computeYaku([a,b,c,d]); total++; if(r.yaku.length===0) none++;
-  for(const y of r.yaku) cntBy[y.name]=(cntBy[y.name]||0)+1;
-}
-console.log("組",total,"役なし",(none/total*100).toFixed(2)+"%","秒",((Date.now()-t0)/1000).toFixed(1));
-// Pythonの全数計算(yaku_combo_share.csv)と比較
-const lines=fs.readFileSync((process.env.HM_DATA_DIR||require("path").join(__dirname,"..","v13m"))+"/yaku_combo_share.csv","utf8").replace(/^\uFEFF/,"").trim().split("\n").slice(1);
-let bad=0;
-for(const ln of lines){ const f=ln.split(","); const name=f[0], py=parseInt(f[5],10); const js=cntBy[name]||0; if(py!==js){bad++; console.log("不一致",name,"Python",py,"JS",js);} }
-console.log("役名",lines.length,"種を比較。不一致",bad);
+// core.js の役判定を、辞書から等間隔に選んだ40語の全組み合わせ(C(40,4)=91,390組・雀頭なし)で、Python(yaku14.Scorer)と全数照合する。
+// (旧版は、全語の全組み合わせ(247語で約1.5億組)を Python の全数CSVと比べていたが、語が342語になり、全数は現実的でないため、部分集合の全数に変更)
+const fs=require("fs"), cp=require("child_process"), path=require("path"); const HM=require("./core.js"); const G=HM.setup(JSON.parse(fs.readFileSync("data.json","utf8")));
+const dir=process.env.HM_DIRNAME||"dan5", f=process.env.HM_PARITY_SUBSET||"/tmp/parity_subset.json";
+if(!fs.existsSync(f)||process.env.HM_REGEN) cp.execSync(`python3 ${path.join(__dirname,"..","tests","make_parity_sample.py")} --dir ${dir} --mode subset --out ${f}`,{stdio:"inherit"});
+const S=JSON.parse(fs.readFileSync(f,"utf8")); let bad=0; const t0=Date.now();
+for(const s of S){ const r=G.computeYaku(s.four,[],null), a=[...new Set(r.raw)].sort().join("|"), b=s.raw.slice().sort().join("|");
+  if(a!==b){ bad++; if(bad<=5) console.log("不一致",s.four.map(i=>G.W[i].word).join(","),"JS",a,"Python",b); } }
+console.log("全数",S.length,"組(40語)。不一致",bad,"秒",((Date.now()-t0)/1000).toFixed(1));
+console.log(bad===0?"すべてOK":"失敗");

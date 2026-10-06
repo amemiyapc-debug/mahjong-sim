@@ -11,5 +11,6 @@ data={"words":[{k:w[k] for k in ("word","type","modifier","modifiers","position"
       "heads":[{k:h[k] for k in ("head","tiles","type","flavor","stem")} for h in Hd],
       "variants":[{k:v[k] for k in ("tile","base","copies","name","mode")} for v in V],
       "merges":[{k:m[k] for k in ("name","source_yaku","han_provisional","level")} for m in M],
-      "options":{"triplesOutOfDeckRule":True,"tileRule":os.environ.get("HM_TILE_RULE","new"),"merges":True}}
+      "options":{"triplesOutOfDeckRule":True,"tileRule":os.environ.get("HM_TILE_RULE","new"),"merges":True,
+                 "modx":float(os.environ.get("HM_MODX","0.1")),"fixed":({"×2":int(os.environ.get("HM_X2","13"))} if any("×2" in w["tiles"].split("|") for w in W) else {})}}
 json.dump(data,open("data.json","w",encoding="utf-8"),ensure_ascii=False); print("data.json 語",len(W),"役",len(Y),"雀頭",len(Hd),"変種",len(V),"合体",len(M))
