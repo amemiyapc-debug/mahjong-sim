@@ -66,6 +66,9 @@ for r in rows:
         r['part']='' if r['slot']=='音' else part_of(r['word'],r['slot'],r['sub'])
         r['tone']=tone_of(r['word'],r['slot'],r['sub'])
         r['slot_no_eff']=r['slot_no']
+TGT={'なめろ':'部位','せめろ':'部位','あけろ':'部位','なめな':'部位','せめな':'部位','あけな':'部位','おなめ':'部位',
+     'いけっ':'反応','いきな':'反応','いくな':'反応','おちろ':'反応','おちな':'反応','なけっ':'喘ぎ声','さけべ':'喘ぎ声'}
+for r in rows: r['target']=TGT.get(r['word'],'') if r['kind']=='語' else ''
 if __name__=='__main__':
     print(len(rows))
     c=collections.Counter((r['slot'],r['part']) for r in rows if r['kind']=='語')

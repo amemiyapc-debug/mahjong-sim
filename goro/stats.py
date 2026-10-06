@@ -36,7 +36,7 @@ samples=[]
 for lab,pool,n in [('絶妙・良(4以上)',hi,14),('並(3)',mid,14)]:
     for a,b,s in random.sample(pool,n): samples.append((lab,a['word'],b['word'],s,a['slot']+'→'+b['slot'] if a['slot_no_eff']<=b['slot_no_eff'] else b['slot']+'→'+a['slot']))
 for a,b in random.sample(rej,10): samples.append(('つながらない(スロットは自然な組)',a['word'],b['word'],0,a['slot']+'/'+b['slot']))
-with open('/mnt/user-data/outputs/link_samples_v1.csv','w',encoding='utf-8-sig',newline='') as f:
+with open('/mnt/user-data/outputs/link_samples_v2.csv','w',encoding='utf-8-sig',newline='') as f:
     w=csv.writer(f);w.writerow(['区分','語A','語B','語呂度','スロット']);w.writerows(samples)
 for s in samples: print(s)
 # MC

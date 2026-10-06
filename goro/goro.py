@@ -23,6 +23,9 @@ def link(a,b):
         sub=lambda r: r['sub'].replace('雀頭・','')
         base=SAME_SUB.get((sub(a),sub(b)),1)
     else: base=BASE.get((sa,sb),0)
+    # 命令語は係り先のスロットに強くつながる(なめろ→部位、いくな→反応 など)
+    for x,y in ((a,b),(b,a)):
+        if x['target'] and x['slot_no_eff']<y['slot_no_eff'] and x['target']==y['slot']: base=max(base,3)
     if base==0: return 0
     p=pscore(a['part'],b['part'])
     if p is None: return 0
