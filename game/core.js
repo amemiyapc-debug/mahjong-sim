@@ -36,7 +36,7 @@ function setup(data){
   }
   const countsOf=arr=>{ const c={}; arr.forEach(t=>c[t]=(c[t]||0)+1); return c; };
   const W=data.words.map((w,i)=>{ const tiles=w.tiles.split("|"), need=mkNeed(tiles.map(norm));
-    return {i,word:w.word,type:w.type,modifier:w.modifier,mods:(w.modifiers||w.modifier||"").split("|").filter(Boolean),position:w.position||"",stem:w.stem,part:w.part,tag:w.tag||"",flavor:w.flavor||"",tiles,need,kinds:Object.keys(need),rawKinds:[...new Set(tiles)]}; });
+    return {i,word:w.word,type:w.type,modifier:w.modifier,mods:(w.modifiers||w.modifier||"").split("|").filter(Boolean),position:w.position||"",stem:w.stem,part:w.part,tag:w.tag||"",flavor:w.flavor||"",slot:String(w.slot_no||""),tiles,need,kinds:Object.keys(need),rawKinds:[...new Set(tiles)]}; });
   const idx={}; W.forEach(w=>idx[w.word]=w.i);
   const H=(data.heads||[]).map((h,i)=>{ const tiles=h.tiles.split("|"), need=mkNeed(tiles.map(norm));
     return {i,head:h.head,type:h.type,flavor:h.flavor,stem:h.stem||"",tiles,need,kinds:Object.keys(need),rawKinds:[...new Set(tiles)]}; });
@@ -104,6 +104,7 @@ function setup(data){
     else if(tok.startsWith("pos:")){ W.forEach(w=>{ if(w.position===tok.slice(4)) s.add(w.i); }); }
     else if(tok.startsWith("stem:")){ W.forEach(w=>{ if(w.stem===tok.slice(5)) s.add(w.i); }); }
     else if(tok.startsWith("part:")){ W.forEach(w=>{ if(w.part===tok.slice(5)) s.add(w.i); }); }
+    else if(tok.startsWith("slot:")){ W.forEach(w=>{ if(w.slot===tok.slice(5)) s.add(w.i); }); }   // dan6: スロット番号(0 前置き〜6 喘ぎ声)
     else { if(!(tok in idx)) throw new Error("辞書にない語: "+tok); s.add(idx[tok]); }
     return s;
   }
@@ -115,7 +116,8 @@ function setup(data){
   // 4語+雀頭がそろって初めて決まる条件(singles_eq・all_in_set・stem_pairs・distinct_*・modifier_pairs・position_split・part_pairs)と、
   // アガリの14牌で決まる variant_count は含めない。雀頭の条件は、雀頭を組んだあとだけ成立する(head が null なら不成立)。
   const MONO=new Set(["count_same_modifier","count_same_stem","count_same_part","count_tail_same_part","count_in_set","contains_all","one_from_each",
-    "pair_same_stem_modifiers","count_part","head_is","head_flavor","head_stem_match","head_part_match"]);
+    "pair_same_stem_modifiers","count_part","head_is","head_flavor","head_stem_match","head_part_match",
+    "count_same_stem_any","count_same_modifier_any","count_type","head_stem_any","head_flavor_set"]);
   const rows=data.yaku.map(y=>{
     const ct=y.condition_type, p=y.params; let f;
     if(ct==="count_same_modifier"){ const a=kv(p), s=expand("mod:"+a.mod), n=+a.n; f=four=>cnt(s,four)>=n; }
@@ -148,6 +150,12 @@ function setup(data){
     else if(ct==="head_flavor"){ const fl=kv(p).flavor; f=(four,tiles,head)=>!!head&&head.type==="喘ぎ声"&&head.flavor===fl; }
     else if(ct==="head_stem_match"){ const a=kv(p), st=a.stem, m=+a.min; f=(four,tiles,head)=>!!head&&head.type==="略称"&&head.stem===st&&four.filter(i=>W[i].stem===st).length>=m; }
     else if(ct==="head_part_match"){ f=(four,tiles,head)=>!!head&&head.type==="略称"&&(PARTS4.includes(head.flavor)||head.flavor==="SM")&&four.some(i=>W[i].part===head.flavor); }
+    // ---- dan6: 部位名・語幹名・修飾牌名などを変数にした1本化の役(yaku14.py と同じ) ----
+    else if(ct==="count_same_stem_any"){ const a=kv(p), n=+a.n, ps=a.parts.split("|"); const st=[...new Set(W.filter(w=>w.stem&&ps.includes(w.part)).map(w=>w.stem))].sort(); const ss=st.map(t=>expand("stem:"+t)); f=four=>ss.some(s=>cnt(s,four)>=n); }
+    else if(ct==="count_same_modifier_any"){ const n=+kv(p).n, ms=[...new Set(W.flatMap(w=>w.mods))].sort(), ss=ms.map(m=>expand("mod:"+m)); f=four=>ss.some(s=>cnt(s,four)>=n); }
+    else if(ct==="count_type"){ const a=kv(p), s=new Set(); W.forEach(w=>{ if(w.type===a.type) s.add(w.i); }); const n=+a.n; f=four=>cnt(s,four)>=n; }
+    else if(ct==="head_stem_any"){ const n=+kv(p).min; f=(four,tiles,head)=>!!head&&head.type==="略称"&&!!head.stem&&four.filter(i=>W[i].stem===head.stem).length>=n; }
+    else if(ct==="head_flavor_set"){ const a=kv(p), s=union(a.set.split("|")), n=+a.min; f=(four,tiles,head)=>!!head&&head.type==="喘ぎ声"&&head.flavor===a.flavor&&cnt(s,four)>=n; }
     else if(ct==="variant_count"){ const a=kv(p), tile=a.tile, m=+a.min; f=(four,tiles)=>(tiles||[]).filter(t=>t===tile).length>=m; }
     else throw new Error("未対応の条件: "+ct);
     return {name:y.name,group:y.group,tier:+y.tier,han:+y.han_provisional,f,ct,mono:MONO.has(ct)};

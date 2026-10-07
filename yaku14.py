@@ -71,6 +71,8 @@ class Scorer:
             return self._mask(lambda i, w: w["stem"] == tok[5:])
         if tok.startswith("part:"):
             return self._mask(lambda i, w: w["part"] == tok[5:])
+        if tok.startswith("slot:"):                       # dan6: スロット番号(words.csv の slot_no。0 前置き〜6 喘ぎ声)
+            return self._mask(lambda i, w: w.get("slot_no") == tok[5:])
         if tok not in self.widx:
             raise ValueError("辞書にない語: " + tok)
         return 1 << self.widx[tok]
@@ -169,6 +171,24 @@ class Scorer:
                     hh = self.H[h]
                     return hh["type"] == "略称" and (hh["flavor"] in PARTS4 or hh["flavor"] == "SM") and \
                         any(W[i]["part"] == hh["flavor"] for i in self._bits(s))
+            # ---- dan6: 部位名・語幹名・修飾牌名などを変数にした1本化の役 ----
+            elif ct == "count_same_stem_any":              # n=N;parts=部位|部位…: 部位のある語幹のうち、どれか1つの語幹の語がN語以上(×2語の語幹も同じ語幹)
+                a = kv(p); n = int(a["n"]); ps = set(a["parts"].split("|"))
+                body = sorted({w["stem"] for w in W if w["stem"] and w["part"] in ps})
+                masks = [self.token_mask("stem:" + st) for st in body]
+                f = lambda s, masks=masks, n=n: any(pc(s & m) >= n for m in masks)
+            elif ct == "count_same_modifier_any":          # n=N: どれか1つの修飾牌を使う語(修飾3型を含む)がN語以上
+                n = int(kv(p)["n"]); masks = [self.token_mask("mod:" + m) for m in mod_names]
+                f = lambda s, masks=masks, n=n: any(pc(s & m) >= n for m in masks)
+            elif ct == "count_type":                       # type=X;n=N: 種類(words.csv の type。×2 など)の語がN語以上
+                a = kv(p); m = self._mask(lambda i, w, t=a["type"]: w["type"] == t); n = int(a["n"]); f = lambda s, m=m, n=n: pc(s & m) >= n
+            elif ct == "head_stem_any":                    # min=N: 雀頭が略称で、同じ語幹の語が手にN語以上(雀頭の条件)
+                n = int(kv(p)["min"]); head = True
+                stem_mask = {st: self.token_mask("stem:" + st) for st in stems}
+                f = lambda s, h, o, n=n: self.H[h]["type"] == "略称" and self.H[h]["stem"] in stem_mask and pc(s & stem_mask[self.H[h]["stem"]]) >= n
+            elif ct == "head_flavor_set":                  # flavor=F;min=N;set=a|b…: 雀頭が喘ぎ声の系統Fで、setの語が手にN語以上(雀頭の条件)
+                a = kv(p); m = self.set_mask(a["set"].split("|")); n = int(a["min"]); fl = a["flavor"]; head = True
+                f = lambda s, h, o, m=m, n=n, fl=fl: self.H[h]["type"] == "喘ぎ声" and self.H[h]["flavor"] == fl and pc(s & m) >= n
             elif ct == "variant_count":
                 a = kv(p); n = int(a["min"]); head = True
                 assert a["tile"] == self.judge.oho_tile, "variant_count は ぉ゛ だけ対応"
