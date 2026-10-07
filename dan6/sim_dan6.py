@@ -2,6 +2,7 @@
   python3 dan6/sim_dan6.py --phase pool   # 強・弱CPU 各2,000ゲーム(見送りなし)を、研究♡0/1/2で評価
   python3 dan6/sim_dan6.py --phase live   # 3種のCPUで、段階クリアを実際に遊ぶ(挑戦 --runs 回)
 結果は results_dan6/ の pool.pkl・live.pkl。表示とCSVは dan6/report_dan6.py。
+条件を狙い直すCPU(seek): 同じ見送り回数で、そのステージの条件を満たさないアガリを見送り、条件を狙い直す(満たすアガリは取る)。
 点を狙うCPU(仮): 見送りを使える(研究♡ごとの回数。1ステージの1回の挑戦=3ゲームで共有)。アガリが、そのステージの条件を満たしていて、かつ
   点が LOW(50,000点)未満のときだけ「見送る」。条件を満たさないアガリは見送らず、そのまま取る。捨て牌は、強CPU(牌効率のヒント)と同じ選び方。"""
 import sys, os, random, argparse, pickle, collections, time
@@ -14,7 +15,7 @@ from sim14 import tile_copies, run_games, Game
 D6 = os.path.join(ROOT, "dan6")
 LOW = 50000
 MAXS = 30
-KINDS = {"strong": "hint", "weak": "weak", "aim": "hint"}
+KINDS = {"strong": "hint", "weak": "weak", "aim": "hint", "seek": "hint"}
 
 
 def sat(m, c):
@@ -45,7 +46,7 @@ def challenge(seed):
     attempts, games, seq3 = [], [], 0
     while lives > 0 and stage <= MAXS:
         cond = min(stage, 8); lv = G.ken_stage(stage); P = {"thresh": G.KEN[lv]}
-        ctx = {"skips": G.SKIPS[lv] if kind == "aim" else 0}
+        ctx = {"skips": G.SKIPS[lv] if kind in ("aim", "seek") else 0}
         used, ok = 0, False
         while used < 3 and not ok:
             ev = []
@@ -53,10 +54,14 @@ def challenge(seed):
             def skip(hand, turn, r):
                 if ctx["skips"] <= 0: return False
                 b = G.best_hand(S, hand, P)
-                if b and sat(b, cond) and b["points"] < LOW:
+                if kind == "aim":                                   # 点を狙う: 条件を満たしていて、点が低いアガリを見送る
+                    take = b and sat(b, cond) and b["points"] < LOW
+                else:                                               # seek(条件を狙い直す): 条件を満たさないアガリを見送る
+                    take = b and not sat(b, cond)
+                if take:
                     ctx["skips"] -= 1; ev.append(b["points"]); return True
                 return False
-            g = Gm.play(rng, skip if kind == "aim" else None)
+            g = Gm.play(rng, skip if kind in ("aim", "seek") else None)
             tsumo += g["turn"]
             rec = dict(stage=stage, lv=lv, cond=cond, result=g["result"], turn=g["turn"], skips=ev, skipfail=bool(g.get("skipfail")))
             if g["result"] == "tenpai":

@@ -97,6 +97,22 @@ button.info{font:inherit;font-size:.74rem;border:1px solid var(--line);backgroun
 .sh-total .big{font-size:2rem;color:#ffd43b;text-shadow:0 0 12px #ff9f1a}
 .sh-btns{margin-top:10px;display:flex;gap:8px;justify-content:center}
 .sh-btns button{background:#fffdf8;color:#1d1b17;border-color:#fff}
+#show{background:rgba(8,12,12,.96)}
+.stone{position:relative;margin:6px 0;padding:14px 12px;min-height:96px;border:3px solid #3f5a56;border-radius:4px;background:#7d9d96;background-size:100% 100%;image-rendering:pixelated;box-shadow:inset 0 0 0 2px #b4d0c8,inset 0 0 28px rgba(30,55,52,.55)}
+.stone .tw{text-align:left;font-weight:900;font-size:1.2rem;line-height:1.55;color:#f2c14e;text-shadow:0 1px 0 #3b2a05,0 -1px 0 #3b2a05,1px 0 0 #3b2a05,-1px 0 0 #3b2a05,0 0 8px rgba(255,214,102,.45);word-break:break-all;min-height:4.6em}
+.stone .tw .ln{display:block}.stone .tw .ln.yk{font-size:1rem;margin-top:2px}
+.stone.carved .tw{animation:carve 1.4s ease-out;text-shadow:0 1px 0 #3b2a05,0 -1px 0 #3b2a05,1px 0 0 #3b2a05,-1px 0 0 #3b2a05,0 0 10px #ffe08a,0 0 22px #ffbf3c}
+@keyframes carve{0%{filter:brightness(2.4);letter-spacing:.12em}100%{filter:none;letter-spacing:0}}
+.sh-graph{position:relative;height:150px;margin:6px 0;border-radius:10px;transition:box-shadow .3s,background .3s}
+.sh-graph svg{position:absolute;inset:0;width:100%;height:100%}
+.sh-graph .nd{position:absolute;transform:translate(-50%,-50%);padding:3px 8px;border-radius:8px;background:#1b1530;color:#efe6ff;border:2px solid #6b4fa0;font-weight:800;font-size:.85rem;white-space:nowrap;transition:box-shadow .3s,border-color .3s,background .3s}
+.sh-graph .nd.on{border-color:var(--pc,#c77dff);box-shadow:0 0 12px var(--pc,#c77dff);background:#2a1b4d}
+.sh-graph .nd.near{animation:near .3s}
+@keyframes near{0%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.25)}100%{transform:translate(-50%,-50%) scale(1)}}
+.sh-mults{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;min-height:34px}
+.sh-mults .mc{padding:4px 10px;border-radius:10px;font-weight:900;color:#fff;background:var(--mc);box-shadow:0 0 14px var(--mc);animation:pop .35s}
+.sh-total .reel{font-size:2.1rem;color:#ffd43b;text-shadow:0 0 12px #ff9f1a;font-variant-numeric:tabular-nums;max-width:100%;white-space:nowrap}
+.tags{margin-top:3px}.ktag{display:inline-block;margin:2px 3px 0 0;padding:0 7px;border-radius:9px;background:#3a3550;color:#cfc8e8;font-size:.7rem}
 #shflash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:60}
 #shflash.go{animation:flash .5s ease-out}
 @keyframes flash{0%{opacity:.95}100%{opacity:0}}
@@ -187,10 +203,9 @@ summary{cursor:pointer}
 <div id="shflash"></div>
 <div id="show" hidden><div class="sh-box" id="shbox">
  <div class="sh-title" id="sh-title"></div>
- <div class="sh-cards" id="sh-cards"></div>
- <div class="sh-yaku" id="sh-yaku"></div>
- <div class="sh-merge" id="sh-merge"></div>
- <div class="sh-yaku" id="sh-bonus"></div>
+ <div class="stone" id="sh-stone"><div class="tw" id="sh-type"></div></div>
+ <div class="sh-graph" id="sh-graph"><svg id="sh-svg" viewBox="0 0 300 150" preserveAspectRatio="none"></svg><div id="sh-nodes"></div></div>
+ <div class="sh-mults" id="sh-mults"></div>
  <div class="sh-total" id="sh-total"></div>
  <div class="sh-btns" id="sh-ingo" hidden><button class="b" id="sh-star">☆ 傑作にする</button><button class="b" id="sh-copy">コピー</button></div>
  <div class="sh-btns"><button class="b" id="sh-skip">スキップ</button><button class="b" id="sh-close" hidden>とじる</button></div>
@@ -741,36 +756,51 @@ function sortHand(){
   items=[...melds,...heads,...dazis,...loose,...(ts?[ts]:[])];sel=[];msg="整理しました。";render();
 }
 function ungroupAll(){if(won||over)return;const out=[];items.forEach(it=>{if(it.k==="tile")out.push(it);else it.tiles.forEach(t=>out.push({k:"tile",tile:t}));});items=out;sel=[];msg="すべてほどきました。";render();}
+let lastUserN=0;
 function checkWin(){
   if(choice||skipMode)return;
   const all=flat();if(all.length!==14||won)return;
   const melds=items.filter(i=>i.k==="group"&&i.kind==="meld");
   const headG=items.find(i=>i.k==="group"&&i.kind==="head")||null;
-  // 手で組んだ面子(部分集合)と雀頭を、できるだけ多く残したまま、アガリ形にできるかを探す。だめなら、全部組み直す
+  const labels=all.map(t=>t.label),oho=labels.filter(l=>l==="ぉ゛").length;
+  const parts=allPartitions(DICT,labels,2000);
+  if(!parts.length)return;
+  const lv=lvOf(STG.stage),key=(n,l)=>n+"|"+l.slice().sort().join("");
+  const info=parts.map(p=>{const ws=p.melds.map(m=>WI.get(m.word.name)),hd=HI.get(p.head.name),sc=scoreHand(ws,hd,oho,true);
+    const gs=g6score(ws.map(w=>DICT.words[w].name),DICT.heads[hd].name,lv,sc.yin);
+    return {p,pts:gs.points,yin:sc.yin,mk:p.melds.map(m=>key(m.word.name,m.assigned)),hk:key(p.head.name,p.headAssigned)};});
+  // 自分で組んだ面子・雀頭を、できるだけ多く残したまま、アガリ形にする。残りの牌は、点が最大になる分け方で自動で組む。だめなら、組み替える
   const subsets=[];for(let m=0;m<(1<<melds.length);m++)subsets.push(melds.filter((_,i)=>m&(1<<i)));
   subsets.sort((x,y)=>y.length-x.length);
   let hit=null;
   outer:for(const sub of subsets)for(const keepHead of(headG?[true,false]:[false])){
-    const fixed=new Set();sub.forEach(g=>g.tiles.forEach(t=>fixed.add(t.id)));if(keepHead)headG.tiles.forEach(t=>fixed.add(t.id));
-    const loose=all.filter(t=>!fixed.has(t.id));
-    if(loose.length!==3*(4-sub.length)+(keepHead?0:2))continue;
-    const r=solve(DICT,loose.map(t=>t.label),new Set(sub.map(g=>g.name)),!keepHead);
-    if(r){hit={sub,keepHead,loose,r};break outer;}
+    const need=sub.map(g=>key(g.name,g.tiles.map(t=>t.label))),hk=keepHead?key(headG.name,headG.tiles.map(t=>t.label)):null;
+    let best=null;
+    for(const x of info){
+      if(hk&&x.hk!==hk)continue;
+      const pool=x.mk.slice();let okc=true;
+      for(const k of need){const i=pool.indexOf(k);if(i<0){okc=false;break;}pool.splice(i,1);}
+      if(!okc)continue;
+      if(!best||x.pts>best.pts||(x.pts===best.pts&&x.yin>best.yin))best=x;
+    }
+    if(best){hit={sub,keepHead,x:best};break outer;}
   }
   if(!hit)return;
-  const {sub,keepHead,loose,r}=hit;
-  const g=[];
-  sub.forEach(x=>g.push(x));
-  r.melds.forEach(m=>g.push({k:"group",kind:"meld",tiles:orderTiles(m.idx.map(i=>loose[i]),m.assigned),text:readingOf(m.word,m.assigned),name:m.word.name}));
-  if(keepHead)g.push(headG);
-  else g.push({k:"group",kind:"head",tiles:orderTiles(r.headIdx.map(i=>loose[i]),r.headAssigned),text:r.head.name,name:r.head.name});
-  const keptN=sub.length+(keepHead?1:0);
+  const {sub,keepHead,x}=hit,p=x.p,g=[];
+  sub.forEach(s=>g.push(s));
+  const fixed=new Set();sub.forEach(s=>s.tiles.forEach(t=>fixed.add(t.id)));if(keepHead)headG.tiles.forEach(t=>fixed.add(t.id));
+  const pool=all.filter(t=>!fixed.has(t.id)),take=lab=>pool.splice(pool.findIndex(t=>t.label===lab),1)[0];
+  const left=x.mk.slice();sub.forEach(s=>{left.splice(left.indexOf(key(s.name,s.tiles.map(t=>t.label))),1);});
+  p.melds.forEach(m=>{const k=key(m.word.name,m.assigned),i=left.indexOf(k);if(i<0)return;left.splice(i,1);
+    g.push({k:"group",kind:"meld",tiles:m.assigned.map(take),text:readingOf(m.word,m.assigned),name:m.word.name});});
+  if(keepHead)g.push(headG);else g.push({k:"group",kind:"head",tiles:p.headAssigned.map(take),text:p.head.name,name:p.head.name});
+  const keptN=sub.length+(keepHead?1:0);lastUserN=melds.length+(headG?1:0);
   if(!practice&&STG.skips>0&&draws<LMAX){items=g;sel=[];tsumoId=null;choice=true;pendingWin={g,keptN};msg="";render();return;}   // 見送りを選べる
   finalizeWin(g,keptN);
 }
 function finalizeWin(g,keptN){
   items=g;sel=[];tsumoId=null;choice=false;pendingWin=null;
-  won={melds:g.filter(x=>x.kind==="meld").map(x=>x.text),head:g.find(x=>x.kind==="head").text,kept:keptN,total:5};won.data=null;const wcur=won;if(DEFER){setTimeout(()=>{if(won===wcur){won.data=evalWin();render();renderIngo();refreshStar();playShow().catch(()=>{showRunning=false;});}},30);}else won.data=evalWin();
+  won={melds:g.filter(x=>x.kind==="meld").map(x=>x.text),head:g.find(x=>x.kind==="head").text,kept:keptN,total:5,user:lastUserN};won.data=null;const wcur=won;if(DEFER){setTimeout(()=>{if(won===wcur){won.data=evalWin();render();renderIngo();refreshStar();playShow().catch(()=>{showRunning=false;});}},30);}else won.data=evalWin();
   msg="";render();
 }
 // ===== 語呂: 役割(スロット)の順 → 前置き・感情・キス・部位・行為・擬音・絶頂・喘ぎ声。同じ役割の中だけ、しりとりが最大になる順に =====
@@ -810,12 +840,6 @@ function evalWin(){
     const sc=scoreHand(ws,hd,oho,true);
     if(!best||sc.yin>best.sc.yin||(sc.yin===best.sc.yin&&sc.total>best.sc.total))best={p,ws,hd,sc};
   }
-  if(won.kept===0&&best){
-    const tiles=flat();const g=[];
-    best.p.melds.forEach(m=>g.push({k:"group",kind:"meld",tiles:orderTiles(m.idx.map(i=>tiles[i]),m.assigned),text:readingOf(m.word,m.assigned),name:m.word.name}));
-    g.push({k:"group",kind:"head",tiles:orderTiles(best.p.headIdx.map(i=>tiles[i]),best.p.headAssigned),text:best.p.head.name,name:best.p.head.name});
-    items=g;
-  }
   const melds0=items.filter(i=>i.k==="group"&&i.kind==="meld"),headG=items.find(i=>i.k==="group"&&i.kind==="head");
   const ord=orderByGoro(melds0.map(g=>WI.get(g.name)));
   const melds=ord.seq.map(u=>melds0.find(g=>WI.get(g.name)===u));
@@ -835,12 +859,16 @@ function evalWin(){
   const top=own.items[0];const title=top?(top.merge?top.name:top.name)+"の巻":"名もなき一篇";
   const hiR=updateHi(gs.points);const entry={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),t:Date.now(),sent:sentence,words:reads,head:headRead,in:total,han:total,pts:gs.points,title,label:gl.name,note:gl.text,score:sc,link:linkPairs,star:false};
   const list=loadIngo();list.unshift(entry);saveIngo(list);
-  return {own:{ws,hd,sc:own,names:melds.map(g=>g.name),melds:reads,head:headRead},best,count:parts.length,ura,total,gs,lv:lvNow,hi:hiR,st:(practice?null:commitWin(gs)),near,sentence,goro:sentence,gl,linkPairs,entry};
+  return {own:{ws,hd,sc:own,names:melds.map(g=>g.name),melds:reads,head:headRead},best,count:parts.length,ura,total,gs,lv:lvNow,firstIn:explainIn(total),hi:hiR,st:(practice?null:commitWin(gs)),near,sentence,goro:sentence,gl,linkPairs,entry};
 }
 function itemsHTML(sc){
-  if(!sc.items.length)return `<div class="sc">名前つき役なし(0淫)</div>`;
-  return sc.items.map(x=>`<div class="sc">${x.merge?"合体 ":""}${x.name} <span class="han">${yv(x)}淫</span>${KZ.has(x.name)?" <small>(飾り。点には加算しない)</small>":""}${x.merge?` <small>(${x.merge.join("+")}の合体)</small>`:""}</div>`).join("");
+  const ys=sc.items.filter(x=>x.merge||!KZ.has(x.name)),zs=sc.items.filter(x=>!x.merge&&KZ.has(x.name));
+  let s=ys.length?ys.map(x=>`<div class="sc">${x.merge?"合体 ":""}${x.name} <span class="han">+${x.han}淫</span>${x.merge?` <small>(${x.merge.join("+")}の合体)</small>`:""}</div>`).join(""):`<div class="sc">点に効く名前つき役はありません</div>`;
+  if(zs.length)s+=`<div class="tags">${zs.map(x=>`<span class="ktag">${x.name}</span>`).join("")}</div>`;
+  return s;
 }
+let inExplained=false;
+function explainIn(y){if(y<=0)return false;let seen=inExplained;try{seen=seen||localStorage.getItem("hm-proto-in-explained")==="1";}catch(e){}if(seen)return false;inExplained=true;try{localStorage.setItem("hm-proto-in-explained","1");}catch(e){}return true;}
 function winHTML(){
   const d=won.data;
   if(!d)return `<h2>アガリ!</h2><div class="hint">役を数えています…</div>`;
@@ -849,9 +877,11 @@ function winHTML(){
   s+=`<div class="sc" style="margin-top:6px;font-size:1.1rem;font-weight:900">「${d.sentence}」</div><div class="ig-meta"><span class="ig-lab ${gcls(d.gl.name)}">${d.gl.name}</span>${d.gl.text}${d.linkPairs.length?" ・ しりとり成立! "+d.linkPairs.join(" "):""}</div>`;
   s+=`<div class="sh-btns" style="justify-content:flex-start;margin:6px 0"><button class="b" id="star2">☆ 傑作にする</button><button class="b" id="copy2">コピー</button></div><div class="hint">淫語集に保存しました。</div>`;
   s+=`<div style="margin-top:6px">${itemsHTML(d.own.sc)}</div>`;
+  if(d.firstIn)s+=`<div class="hint" style="margin-top:4px"><b>淫</b>とは: 名前つき役の数字です。句ボーナスに足されて、点が増えます(例: +3淫なら、句ボーナスが +3)。</div>`;
   if(d.ura>0)s+=`<div class="sc">裏読みボーナス <span class="han">+${d.ura}淫</span> <small>(同じ14牌は「${d.best.p.melds.map(m=>readingOf(m.word,m.assigned).split("・")[0]).join("・")}+${d.best.p.head.name}」とも読める)</small></div>`;
   if(d.st)s+=`<div class="sc">ステージ: ${d.st}</div>`;
-  if(won.kept<won.total)s+=`<div class="hint" style="margin-top:6px">手で組んだ形のうち ${won.kept}/${won.total} をそのまま使い、残りは自動で組みました。</div>`;
+  if(won.user>won.kept)s+=`<div class="hint rearr" style="margin-top:6px"><b>組み替えました</b>。自分で組んだ ${won.user} 個のうち ${won.kept} 個はそのまま使い、残りは、アガリになる形に組み替えました。</div>`;
+  else if(won.kept<5)s+=`<div class="hint" style="margin-top:6px">自分で組んだ ${won.kept} 個はそのまま。残りの牌は、点が最大になる分け方で自動で組みました。</div>`;
   if(hint&&d.near.length)s+=`<div class="miss" style="margin-top:8px"><b>惜しかった役</b>(1語を替えれば成立)<br>${d.near.slice(0,5).map(e=>e.name+"("+e.han+"淫) ← 「"+DICT.words[e.ex[0].from].name+"」を「"+DICT.words[e.ex[0].to].name+"」に").join("<br>")}</div>`;
   s+=`<div class="sh-btns" style="margin-top:8px"><button class="b" id="replay">演出をもう一度</button></div>`;
   return s;
@@ -887,57 +917,99 @@ function flashScreen(){const f=$$("shflash");f.classList.remove("go");void f.off
 function shakeBox(){const b=$$("shbox");b.classList.remove("shake");void b.offsetWidth;b.classList.add("shake");}
 function confetti(n,items){if(skipShow)return;const L=items||["♡","✦","ん","ち","ま","♡","★","あ"],C=["#ff6ba0","#ffd43b","#69db7c","#4dabf7","#da77f2","#fff"];for(let i=0;i<n;i++){const s=document.createElement("span");s.className="cf";s.textContent=L[i%L.length];s.style.left=Math.random()*100+"vw";s.style.fontSize=(14+Math.random()*18)+"px";s.style.color=C[i%C.length];s.style.animationDuration=(1.8+Math.random()*1.6)+"s";s.style.animationDelay=(Math.random()*.5)+"s";document.body.appendChild(s);setTimeout(()=>s.remove(),4200);}}
 const rar=h=>h>=5?"r4":h>=3?"r3":h>=2?"r2":"r1";
+/* dan6:show *//* dan6:c */
+// ===== アガリ演出(20261007-1345・1350): タイプライター(4文字/秒・金文字・石碑)→ ジングル → パワー溜め → 点リール → 最終(ガチャ風・碑文に刻む) =====
+let STONE_URL=null;
+function stoneURL(){
+  if(STONE_URL!==null)return STONE_URL;
+  try{const w=160,h=120,c=document.createElement("canvas");c.width=w;c.height=h;const g=c.getContext("2d");
+    g.fillStyle="#7d9d96";g.fillRect(0,0,w,h);
+    let sd=7;const rnd=()=>{sd=(sd*16807)%2147483647;return sd/2147483647;};
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){const r=rnd();if(r<.12){g.fillStyle="#6a8982";g.fillRect(x,y,1,1);}else if(r>.92){g.fillStyle="#98b8b0";g.fillRect(x,y,1,1);}}
+    g.fillStyle="rgba(40,70,66,.16)";for(let k=0;k<14;k++)g.fillRect(Math.floor(rnd()*w),0,1+(k%2),10+Math.floor(rnd()*46));
+    g.fillStyle="#b4d0c8";g.fillRect(0,0,w,2);g.fillRect(0,0,2,h);g.fillStyle="#3f5a56";g.fillRect(0,h-2,w,2);g.fillRect(w-2,0,2,h);
+    STONE_URL=c.toDataURL();}catch(e){STONE_URL="";}
+  return STONE_URL;
+}
+function nzs(d,g,when,cut,type){try{if(!AC||!SOUND||skipShow)return;const n=Math.floor(AC.sampleRate*d),b=AC.createBuffer(1,n,AC.sampleRate),x=b.getChannelData(0);for(let i=0;i<n;i++)x[i]=(Math.random()*2-1)*(1-i/n);const s=AC.createBufferSource(),f=AC.createBiquadFilter(),a=AC.createGain();s.buffer=b;f.type=type||"lowpass";f.frequency.value=cut||1800;a.gain.value=g||.2;s.connect(f);f.connect(a);a.connect(AC.destination);s.start(AC.currentTime+(when||0));}catch(e){}}
+const m2f=n=>440*Math.pow(2,(n-69)/12);
+// 1文字ごとの「カシャ」(タイプライター)。行末のベルは鳴らさない
+function kasha(){nzs(.03,.3,0,3500,"highpass");tone(2300,.025,"square",.05,0,1500);nzs(.06,.16,.04,2200,"bandpass");tone(700,.035,"triangle",.06,.045,380);}
+function mar(f,when,dur,g){tone(f,dur,"sine",g||.16,when);tone(f*4,dur*.35,"sine",(g||.16)*.35,when);nzs(.012,.05,when,5000,"highpass");}
+function bell(f,when,dur,g){[1,2.76,5.4,8.9].forEach((m,i)=>tone(f*m,dur/(1+i*.6),"sine",(g||.12)/(1+i*1.3),when));}
+// 打ち終わりのジングル(新作。Dドリアン+ブルーノート(Ab)、マリンバ+ベル、ウォーキングベース1小節。約2.8秒)
+function jingle(){
+  const B=60/104;
+  [[38,0],[41,1],[45,2],[48,3]].forEach(([n,b])=>{tone(m2f(n),B*.9,"triangle",.2,b*B);tone(m2f(n)*2,B*.45,"sine",.05,b*B);});
+  [[50,0],[53,0],[57,0],[60,0],[50,2.5],[57,2.5],[60,2.5]].forEach(([n,b])=>tone(m2f(n+12),.35,"triangle",.045,b*B));
+  [[74,0,.5],[77,.67,.33],[76,1,.5],[72,1.5,.5],[68,2,.33],[69,2.33,.33],[72,2.67,.33]].forEach(([n,b,d])=>mar(m2f(n),b*B,d*B*1.6,.17));
+  bell(m2f(74),3*B,1.1,.14);mar(m2f(62),3*B,.6,.1);
+}
+function linkSnd(s){const f=s>=5?880:s===4?659.25:523.25;tone(f,.2,"triangle",.12,0,f*1.5);if(s>=5)tone(f*1.5,.25,"sine",.06,.05);}
+function multSnd(i){tone(330+i*110,.35,"sawtooth",.06,0,660+i*220);tone(165+i*55,.35,"sine",.1,0);}
+function gachaSfx(){tone(200,.55,"sawtooth",.07,0,1800);for(let i=0;i<16;i++)tone(2000+Math.random()*3500,.08,"sine",.05,Math.random()*.9);[74,78,81,86].forEach((n,i)=>bell(m2f(n),.5+i*.05,1.1,.12));nzs(.5,.25,.5,6000,"highpass");}
+const fx=x=>String(Math.round(x*100)/100);
+async function reelTo(a,b,ms){
+  const el=$$("sh-reel");if(!el)return;
+  const steps=skipShow?1:Math.max(3,Math.round(ms/40));
+  for(let i=1;i<=steps;i++){const e=1-Math.pow(1-i/steps,3);const v=i===steps?b:a*Math.pow(b/a,e);let t=fmtPts(v);
+    if(i<steps)t=t.replace(/\d(?=\D*$)/,()=>String(Math.floor(Math.random()*10)));
+    el.textContent=t+"点";if(!skipShow)SFX.tick();await slShow(40);}
+  el.dataset.points=String(Math.round(b));el.textContent=fmtPts(b)+"点";
+}
+let slShow=()=>Promise.resolve();
 async function playShow(){
   if(!SHOW||!won||!won.data||showRunning)return;
-  const d=won.data,sc=d.own.sc;showRunning=true;skipShow=false;ensureAudio();const tok=++showTok;
+  const d=won.data,g=d.gs,sc=d.own.sc;showRunning=true;skipShow=false;ensureAudio();const tok=++showTok;
   const sl=ms=>new Promise((res,rej)=>{const go=()=>tok!==showTok?rej(CANCEL):res();skipShow?go():setTimeout(go,ms);});
+  slShow=sl;
   try{
   const root=$$("show");root.hidden=false;root.classList.remove("noanim");
-  ["sh-title","sh-cards","sh-yaku","sh-merge","sh-bonus","sh-total"].forEach(i=>$$(i).innerHTML="");$$("sh-ingo").hidden=true;$$("sh-merge").className="sh-merge";
-  $$("sh-skip").hidden=false;$$("sh-close").hidden=true;
-  // 1) アガリ!
-  SFX.don();flashScreen();shakeBox();$$("sh-title").innerHTML='<span class="bigpop" style="display:inline-block">アガリ!</span>';
-  await sl(900);
-  // 2) 面子が1つずつ
-  const words=d.own.melds;
-  for(let i=0;i<words.length;i++){const e=document.createElement("span");e.className="wcard pop";e.innerHTML=words[i];$$("sh-cards").appendChild(e);SFX.pon(i);await sl(330);}
-  {const e=document.createElement("span");e.className="wcard head pop";e.textContent="雀頭 "+d.own.head;$$("sh-cards").appendChild(e);SFX.pon(4);await sl(450);}
-  {const e=document.createElement("div");e.className="sh-sent pop";e.style.width="100%";e.textContent="「"+d.sentence+"」";$$("sh-cards").appendChild(e);SFX.jan(1);await sl(900);
-    const g=document.createElement("div");g.style.width="100%";g.innerHTML='<span class="sh-lab '+gcls(d.gl.name)+' bigpop">'+d.gl.name+'</span><div class="sh-note pop">'+d.gl.text+(d.linkPairs.length?" ・ しりとり成立! "+d.linkPairs.join(" "):"")+'</div>';$$("sh-cards").appendChild(g);
-    if(d.gl.name==="名文!"){SFX.kira();flashScreen();confetti(20);}else SFX.pon(5);await sl(900);}
-  // 3) 役(合体に入らない役)
-  const plain=sc.items.filter(x=>!x.merge).sort((a,b)=>a.han-b.han),mergeItems=sc.items.filter(x=>x.merge);
-  let shown=0;const total=d.total;
-  const setTotal=(n)=>{$$("sh-total").innerHTML='<span style="font-size:.85rem;font-weight:700">いまの合計</span><br><span class="big">'+n+'淫</span>';};
-  setTotal(shown);
-  if(!plain.length&&!mergeItems.length){const e=document.createElement("span");e.className="ycard r1 pop";e.innerHTML="名前つき役なし<small>0淫</small>";$$("sh-yaku").appendChild(e);await sl(600);}
-  const quick=plain.length>6;let pi=0;
-  for(const y of plain){pi++;const fast=quick&&y.han<3&&pi<plain.length-2;const e=document.createElement("span");e.className="ycard "+rar(y.han)+" pop";e.innerHTML=y.name+"<small>"+yv(y)+"淫</small>"+(KZ.has(y.name)?"":"");$$("sh-yaku").appendChild(e);if(!fast)SFX.jan(y.han);else SFX.pon(pi%8);if(y.han>=3){flashScreen();shakeBox();}shown+=yv(y);setTotal(shown);await sl(fast?170:(y.han>=3?800:520));}
-  // 4) 合体
-  for(const m of mergeItems){
-    const mg=$$("sh-merge");mg.className="sh-merge";mg.innerHTML='<div class="mhead">おや…? 役が、光りはじめた…!</div><div class="row" id="sh-src"></div>';
-    for(const n of m.merge){const e=document.createElement("span");const hh=(sc.actual&&sc.actual[n])||HAN_NAME[n]||1;e.className="ycard src "+rar(hh)+" pop";e.innerHTML=n+"<small>"+hh+"淫</small>";$$("sh-src").appendChild(e);SFX.jan(hh);await sl(mergeItems.length>1?380:520);}
-    await sl(300);SFX.charge();mg.classList.add("charge");await sl(750);
-    flashScreen();shakeBox();SFX.kira();confetti(26);
-    mg.className="sh-merge";mg.innerHTML='<div class="mcard">合体!<br>'+m.name+'<small>'+m.han+'淫</small></div>';
-    shown+=m.han;setTotal(shown);await sl(1500);
+  ["sh-title","sh-type","sh-svg","sh-nodes","sh-mults","sh-total"].forEach(i=>$$(i).innerHTML="");
+  $$("sh-ingo").hidden=true;$$("sh-skip").hidden=false;$$("sh-close").hidden=true;
+  const st=$$("sh-stone"),gr=$$("sh-graph");st.classList.remove("carved");gr.style.boxShadow="";gr.style.background="";
+  const su=stoneURL();if(su)st.style.backgroundImage="url("+su+")";
+  $$("sh-title").innerHTML='<span class="bigpop" style="display:inline-block">アガリ!</span>';
+  // 1) タイプライター: 完成した淫語(全文)→ 点に効く名前つき役(+N淫)。1文字 約250ms(1秒に4文字)。打っている間は「カシャ」だけ(メロディなし)
+  const typ=$$("sh-type"),lines=[{t:d.sentence,c:"ln"}];
+  const ys=sc.items.filter(x=>x.merge||!KZ.has(x.name)).slice().sort((a,b)=>b.han-a.han).map(x=>({t:x.name+" +"+x.han+"淫",c:"ln yk"}));
+  if(d.ura>0)ys.unshift({t:"裏読み +"+d.ura+"淫",c:"ln yk"});
+  const BUD=30;let used=d.sentence.length;      // 打つ文字数の上限(約7.5秒。「…他N」の3文字ぶんを残す。全体を約12秒に収めるため)
+  for(let i=0;i<ys.length;i++){const more=ys.length-i-1>0?3:0;if(used+ys[i].t.length+more<=BUD){lines.push(ys[i]);used+=ys[i].t.length;}else{lines.push({t:"…他"+(ys.length-i),c:"ln yk"});break;}}
+  for(const L of lines){const el=document.createElement("span");el.className=L.c;typ.appendChild(el);
+    for(const ch of Array.from(L.t)){el.textContent+=ch;kasha();await sl(250);}}
+  // 2) ジングル(約2.8秒)。途中からパワー溜めに入る
+  jingle();await sl(1100);
+  // 3) パワー溜め: 句(つながり)が1本できるたびに、語と語が線でつながり、光が強くなる(紫→ピンク)
+  const names=d.own.ws.map(w=>DICT.words[w].name).concat(["【雀頭】"+DICT.heads[d.own.hd].name]),labs=d.own.melds.concat([d.own.head]);
+  const nodes=$$("sh-nodes"),svg=$$("sh-svg"),pos=[];
+  names.forEach((n,i)=>{const a=(-90+i*72)*Math.PI/180,x=150+105*Math.cos(a),y=75+52*Math.sin(a);pos.push([x,y]);
+    const e=document.createElement("div");e.className="nd";e.style.left=(x/3)+"%";e.style.top=(y/1.5)+"%";e.textContent=String(labs[i]).split("・")[0];nodes.appendChild(e);});
+  const PC=["#9b5de5","#b44be8","#c94ad8","#e04ac0","#f15bb5","#ff7ac8","#ff9ad5"];let lvl=0;
+  for(const [a,b,s] of g.pairs.slice().sort((x,y)=>x[2]-y[2])){
+    const ia=names.indexOf(a),ib=names.indexOf(b);if(ia<0||ib<0)continue;lvl++;const col=PC[Math.min(PC.length-1,lvl)];
+    const ln=document.createElementNS("http://www.w3.org/2000/svg","line");
+    ln.setAttribute("x1",pos[ia][0]);ln.setAttribute("y1",pos[ia][1]);ln.setAttribute("x2",pos[ib][0]);ln.setAttribute("y2",pos[ib][1]);ln.setAttribute("stroke",col);ln.setAttribute("stroke-width",String(1.5+s*.5));ln.setAttribute("stroke-linecap","round");svg.appendChild(ln);
+    [ia,ib].forEach(i=>{const e=nodes.children[i];e.classList.add("on");e.style.setProperty("--pc",col);e.classList.remove("near");void e.offsetWidth;e.classList.add("near");});
+    gr.style.boxShadow="0 0 "+(8+lvl*6)+"px "+col+", inset 0 0 "+(10+lvl*8)+"px "+col+"88";gr.style.background="rgba(155,93,229,"+(0.08+lvl*0.05)+")";
+    linkSnd(s);await sl(270);
   }
-  // 5) ボーナス
-  if(d.ura>0){
-    const bx=$$("sh-bonus");const hd=document.createElement("div");hd.className="mhead";hd.textContent="この牌、こうも読めちゃう…♡";bx.appendChild(hd);
-    const u=document.createElement("div");u.className="ura pop";u.textContent=d.best.p.melds.map(m=>readingOf(m.word,m.assigned).split("・")[0]).join("・")+"+"+d.best.p.head.name;bx.appendChild(u);await sl(700);
-    const e=document.createElement("span");e.className="ycard r4 pop";e.innerHTML="裏読み!<small>+"+d.ura+"淫</small>";bx.appendChild(e);SFX.kira();flashScreen();shakeBox();shown+=d.ura;setTotal(shown);await sl(1100);
-  }
-  // 6) 合計(点)
-  const T=d.total,g=d.gs;
-  for(let i=shown;i<=T&&!skipShow;i++){setTotal(i);SFX.tick();await sl(60);}
-  $$("sh-total").innerHTML='<span class="big bigpop" style="display:inline-block">'+fmtPts(g.points)+'点</span><br><small>500 × 句ボーナス '+g.bonus+' × 連鎖 '+(g.chainN?g.chain.toFixed(2):1)+' × テーマ '+g.theme+'</small>'+(d.st?'<br><small>'+d.st+'</small>':'');
-  if(T>=5||mergeItems.length||g.points>=100000){SFX.fan();flashScreen();shakeBox();confetti(40);}else SFX.jan(Math.max(1,T));
+  // 掛け算: 句ボーナス → 連鎖倍率 → テーマ倍率。点リールが、掛け算のたびに回る
+  const T=$$("sh-total");T.innerHTML='<div class="reel" id="sh-reel" data-points="500">500点</div>';
+  const MC=["#7b2cbf","#b5179e","#f72585"],steps=[["句ボーナス",g.bonus],["連鎖",g.chain],["テーマ",g.theme]];let cur=G6.FLOOR;
+  for(let i=0;i<3;i++){const [nm,f]=steps[i];const e=document.createElement("span");e.className="mc";e.style.setProperty("--mc",MC[i]);e.textContent=nm+" ×"+fx(f);$$("sh-mults").appendChild(e);multSnd(i);
+    const nv=cur*f;await reelTo(cur,nv,f>1?350:120);cur=nv;}
+  // 4) 最終: ガチャ風のキラキラ。最終の点が確定し、金文字の全文が碑文に刻み込まれる
+  gachaSfx();flashScreen();shakeBox();confetti(40);
+  T.innerHTML='<div class="reel big bigpop" id="sh-reel" data-points="'+Math.round(g.points)+'">'+fmtPts(g.points)+'点</div><small>500 × 句ボーナス '+g.bonus+' × 連鎖 '+fx(g.chain)+' × テーマ '+g.theme+'</small>'+(d.st?'<br><small>'+d.st+'</small>':'');
+  st.classList.add("carved");await sl(1000);
   skipShow=false;showRunning=false;$$("sh-skip").hidden=true;$$("sh-close").hidden=false;$$("sh-ingo").hidden=false;refreshStar();
 }catch(e){if(e!==CANCEL)throw e;}
 }
+/* /dan6:show */
+
 $$("sh-skip").onclick=()=>{skipShow=true;$$("show").classList.add("noanim");};
-$$("show").addEventListener("click",e=>{if(e.target.id==="show"&&showRunning){skipShow=true;$$("show").classList.add("noanim");}});
+$$("show").addEventListener("click",e=>{if(showRunning&&!e.target.closest("button")){skipShow=true;$$("show").classList.add("noanim");}});
 $$("sh-close").onclick=()=>{$$("show").hidden=true;};
 $$("sh-star").onclick=()=>{if(won&&won.data)ingoAct("star",won.data.entry.id);};
 $$("sh-copy").onclick=()=>{if(won&&won.data)copyText(won.data.sentence);};

@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(ROOT, "game"))
 from pw import sync_playwright, launch
 URL = "file://" + os.path.abspath(os.path.join(ROOT, "prototype", "hiragana_tap_prototype.html"))
 res, errs = [], []
+SHOTS = os.path.join(ROOT, "results_dan6", "shots"); os.makedirs(SHOTS, exist_ok=True)
 def ok(n, c, extra=""):
     res.append(bool(c)); print(("OK  " if c else "NG  ") + n + (" " + extra if extra else ""))
 COL = ["#E6E1EA", "#FFB8D4", "#FFD3C2", "#F0A0DC", "#BFD4FF", "#CDB0F5", "#FFF0A6"]
@@ -150,6 +151,110 @@ with sync_playwright() as p:
     # 研究♡が上がったときの表示(ステージ2クリア→3で 0→1)
     r = pg.evaluate("""()=>{ dealRandom(); STG.stage=2; STG.game=1; STG.lives=3; newTry(); const gs={size:5,themeK:3,composite:[]}; const m=commitWin(gs); return {stage:STG.stage,news:STG.news,bar:stageBarHTML()}; }""")
     ok("研究♡が上がる(無知→恥ずかしい): 「新しい語呂が見えるようになった」が表示される", r["stage"] == 3 and "新しい語呂が見えるようになった" in r["news"] and "恥ずかしい" in r["bar"] and "新しい語呂が見えるようになった" in r["bar"], r["news"])
+    # ===== 20261007-1345・1350 =====
+    import time as _t
+    # --- 1. 自分で組んだ面子を組み替えない(画面で確認) ---
+    hand_a = ['デカ', 'ぱ', 'い', 'ぬれ', '媚び', '♡', 'け', 'つ', '穴', 'エロ', '舐め', '♡', 'ま', 'ん']       # 分け方が267通りある手
+    FIX = """(labels)=>{ STG.stage=1;STG.game=1;STG.lives=3;newTry(); dealPractice(); const toks=labels.map(l=>mk(l)); deck=[]; draws=0; won=null; over=false; choice=false; skipMode=false;
+      const oho=labels.filter(l=>l==='ぉ゛').length, lv=lvOf(STG.stage), parts=allPartitions(DICT,labels,2000);
+      const pts=parts.map(p=>{const ws=p.melds.map(m=>WI.get(m.word.name)),hd=HI.get(p.head.name),sc=scoreHand(ws,hd,oho,true);return g6score(ws.map(w=>DICT.words[w].name),DICT.heads[hd].name,lv,sc.yin).points;});
+      const maxI=pts.indexOf(Math.max(...pts)); const names=p=>p.melds.map(m=>m.word.name).sort().join('/')+'+'+p.head.name;
+      let userI=pts.findIndex((x,i)=>x<pts[maxI]&&names(parts[i])!==names(parts[maxI]));
+      return {n:parts.length,maxI,userI,maxNames:names(parts[maxI]),userNames:names(parts[userI]),maxPts:pts[maxI],userPts:pts[userI]}; }"""
+    r0 = pg.evaluate(FIX, hand_a)
+    # 自分の組(最大でない分け方)を、全部組んだ状態で14枚にする → checkWin
+    PLACE = """([labels,userI,k])=>{ const toks=labels.map(l=>mk(l)); const pool=toks.slice(); const take=l=>pool.splice(pool.findIndex(t=>t.label===l),1)[0];
+      const parts=allPartitions(DICT,labels,2000),p=parts[userI]; const g=[];
+      p.melds.slice(0,k).forEach(m=>g.push({k:'group',kind:'meld',tiles:m.assigned.map(take),text:readingOf(m.word,m.assigned),name:m.word.name}));
+      if(k>=4)g.push({k:'group',kind:'head',tiles:p.headAssigned.map(take),text:p.head.name,name:p.head.name});
+      items=g.concat(pool.map(t=>({k:'tile',tile:t}))); deck=[]; draws=0; won=null; over=false; choice=false; skipMode=false; render(); checkWin();
+      return {won:!!won, melds:items.filter(x=>x.k==='group'&&x.kind==='meld').map(x=>x.name).sort().join('/'), head:(items.find(x=>x.k==='group'&&x.kind==='head')||{}).name, kept:won&&won.kept, user:won&&won.user}; }"""
+    ok("手牌固定の準備: この手には、点が最大でない別の分け方がある", r0["userI"] >= 0 and r0["userNames"] != r0["maxNames"], f"({r0['n']}通り。最大 {r0['maxNames']} / 自分の組 {r0['userNames']})")
+    r1 = pg.evaluate(PLACE, [hand_a, r0["userI"], 4]); pg.wait_for_timeout(200)
+    ok("自分で4語+雀頭を組んだ手: アガリのあとも、同じ形で数える(最大点の分け方に組み替えない)", r1["won"] and r1["melds"] + "+" + r1["head"] == r0["userNames"] and r1["kept"] == 5, f"({r1['melds']}+{r1['head']} / 自分の組 {r0['userNames']})")
+    r2 = pg.evaluate(PLACE, [hand_a, r0["userI"], 2]); pg.wait_for_timeout(200)
+    exp2 = pg.evaluate("""([labels,userI])=>{ const oho=0,lv=lvOf(STG.stage),parts=allPartitions(DICT,labels,2000),u=parts[userI]; const keep=u.melds.slice(0,2).map(m=>m.word.name);
+      let best=null; for(const p of parts){ const ns=p.melds.map(m=>m.word.name); if(!keep.every(k=>ns.includes(k)))continue; const ws=p.melds.map(m=>WI.get(m.word.name)),hd=HI.get(p.head.name),sc=scoreHand(ws,hd,oho,true);
+        const pts=g6score(ws.map(w=>DICT.words[w].name),DICT.heads[hd].name,lv,sc.yin).points; if(!best||pts>best.pts)best={pts,ns:ns.slice().sort().join('/'),h:p.head.name}; } return best; }""", [hand_a, r0["userI"]])
+    ok("自分で2語だけ組んだ手: その2語は残し、残りの牌は、点が最大になる分け方で自動で組む", r2["won"] and r2["kept"] == 2 and r2["melds"] == exp2["ns"] and r2["head"] == exp2["h"], f"({r2['melds']}+{r2['head']} / 期待 {exp2['ns']}+{exp2['h']})")
+    # 組み替え: どの完成形にも入らない語を、自分で組んだ場合
+    r3 = pg.evaluate("""(labels)=>{ const parts=allPartitions(DICT,labels,2000); const inAny=new Set(); parts.forEach(p=>p.melds.forEach(m=>inAny.add(m.word.name+'|'+m.assigned.slice().sort().join(''))));
+      for(let i=0;i<labels.length;i++)for(let j=i+1;j<labels.length;j++)for(let k=j+1;k<labels.length;k++){ const tl=[labels[i],labels[j],labels[k]]; const r=findWord(DICT,tl,new Set()); if(!r)continue;
+        if(!inAny.has(r.word.name+'|'+r.assigned.slice().sort().join(''))) return {ids:[i,j,k],name:r.word.name}; } return null; }""", hand_a)
+    ok("組み替えの準備: 語になるが、どの完成形にも入らない3枚がある", r3 is not None, str(r3))
+    if r3:
+        r4 = pg.evaluate("""([labels,ids])=>{ const toks=labels.map(l=>mk(l)); const tl=ids.map(i=>toks[i]); const r=findWord(DICT,tl.map(t=>t.label),new Set());
+          const g=[{k:'group',kind:'meld',tiles:orderTiles(tl,r.assigned),text:r.reading,name:r.word.name}]; const rest=toks.filter((t,i)=>!ids.includes(i));
+          items=g.concat(rest.map(t=>({k:'tile',tile:t}))); deck=[]; draws=0; won=null; over=false; choice=false; skipMode=false; practice=true; render(); checkWin();
+          return {won:!!won,kept:won&&won.kept,user:won&&won.user,html:won?document.getElementById('win').innerHTML:'',names:items.filter(x=>x.k==='group'&&x.kind==='meld').map(x=>x.name)}; }""", [hand_a, r3["ids"]]); pg.wait_for_timeout(200)
+        html_w = pg.evaluate("()=>document.getElementById('win').innerHTML")
+        ok("自分の組を壊さないとアガリにならない場合だけ組み替え、「組み替えました」と画面に出る", r4["won"] and r4["kept"] == 0 and r4["user"] == 1 and "組み替えました" in html_w and r3["name"] not in r4["names"], str(r4["names"]))
+    # --- 2. 飾りに「0淫」を出さない。淫の説明は初めて淫が付いたときに1回だけ ---
+    r5 = pg.evaluate("""()=>{ localStorage.removeItem('hm-proto-in-explained'); inExplained=false; const parts=allPartitions(DICT,%s,2000); let kz=null;
+      for(const p of parts){ const ws=p.melds.map(m=>WI.get(m.word.name)),hd=HI.get(p.head.name),sc=scoreHand(ws,hd,0,true); if(sc.items.some(x=>KZ.has(x.name))&&sc.items.some(x=>!KZ.has(x.name))){kz=sc;break;} }
+      if(!kz)return null; const h=itemsHTML(kz); return {html:h,names:kz.items.map(x=>x.name),zero:/0淫/.test(h),plus:(h.match(/\\+\\d+淫/g)||[]).length,tags:(h.match(/ktag/g)||[]).length,e1:explainIn(1),e2:explainIn(2)}; }""" % str(hand_a).replace("'", '"'))
+    if r5 is None:   # この手には飾りが無い: 飾りのある手を、無作為に探す
+        r5 = pg.evaluate("""()=>{ localStorage.removeItem('hm-proto-in-explained'); inExplained=false; const W=DICT.words; const rnd=n=>Math.floor(Math.random()*n);
+          for(let t=0;t<4000;t++){ const ws=[];while(ws.length<4){const w=rnd(W.length);if(!ws.includes(w))ws.push(w);} const hd=rnd(DICT.heads.length); const sc=scoreHand(ws,hd,0,true);
+            if(sc.items.some(x=>KZ.has(x.name))&&sc.items.some(x=>!KZ.has(x.name))){const h=itemsHTML(sc);return {html:h,names:sc.items.map(x=>x.name),zero:/0淫/.test(h),plus:(h.match(/\\+\\d+淫/g)||[]).length,tags:(h.match(/ktag/g)||[]).length,e1:explainIn(1),e2:explainIn(2)};} } return null; }""")
+    ok("飾り(獣の声・ぶっかけなど)に「0淫」が出ない。点に効く役は「+N淫」、飾りは数字なしの小さなタグ", r5 and not r5["zero"] and r5["plus"] >= 1 and r5["tags"] >= 1, str(r5)[:160])
+    ok("淫の説明は、初めて淫が付いたときに1回だけ", r5 and r5["e1"] is True and r5["e2"] is False)
+    # --- 3. アガリ演出: 1→2→3→4の順・4文字/秒・金文字・石碑・ジングル・スキップ・最終の点 ---
+    cand = None
+    rr = random.Random(5)
+    for _ in range(4000):
+        wsx = rr.sample(range(len(S.W)), 4); hx = rr.randrange(len(S.H)); tl = mk(wsx, hx)
+        bh = G6.best_hand(S, tl, {"thresh": 4})
+        if bh and bh["links"] >= 3 and bh["yin"] >= 2 and len(bh["yaku"]) >= 2 and len(S.judge.partitions(tl)) <= 6:
+            cand = tl; break
+    ok("演出テスト用の手(つながり3本以上・名前つき役2つ以上)を用意した", cand is not None)
+    tl = cand
+    draw_tile = tl[-1]; h13 = tl[:-1]
+    SHOWSETUP = """([tiles,dr])=>{ STG.stage=1;STG.game=1;STG.lives=3;newTry(); dealPractice(); items=tiles.map(l=>({k:'tile',tile:mk(l)})); deck=[dr]; draws=0; won=null; over=false; choice=false; skipMode=false; SHOW=true; SOUND=true;
+      window._ev=[]; const wrap=(n)=>{const o=window[n]; window[n]=function(...a){window._ev.push([n,performance.now()]); return o.apply(this,a);};}; ['kasha','jingle','linkSnd','multSnd','gachaSfx'].forEach(wrap);
+      window._t0=null; const typ=document.getElementById('sh-type'); window._len=[]; new MutationObserver(()=>{window._len.push([performance.now(),typ.textContent.length]);}).observe(typ,{childList:true,subtree:true,characterData:true});
+      render(); draw(); return {won:!!won}; }"""
+    pg.evaluate(SHOWSETUP, [h13, draw_tile]); pg.wait_for_timeout(100)
+    t_start = _t.time()
+    pg.wait_for_timeout(1500); pg.screenshot(path=os.path.join(SHOTS, "show_1_typewriter.png"))
+    pg.wait_for_timeout(2500)
+    # タイプ中の速さ: 文字数の増え方
+    lens = pg.evaluate("()=>window._len")
+    ts = [x[0] for x in lens]; ivs = [b - a for a, b in zip(ts, ts[1:]) if 150 < b - a < 400]
+    mean_iv = sum(ivs) / len(ivs) if ivs else 0
+    ok(f"文字が1秒に4文字(1文字 約250ms)で、1文字ずつ出る(測定: 平均 {mean_iv:.0f}ms/文字、{len(ivs)}文字ぶん)", ivs and 230 <= mean_iv <= 290, "")
+    # 完了まで待つ
+    for _ in range(60):
+        if pg.evaluate("()=>!document.getElementById('sh-close').hidden"): break
+        pg.wait_for_timeout(250)
+    total_s = _t.time() - t_start
+    ev = pg.evaluate("()=>window._ev"); names_ev = [e[0] for e in ev]
+    last_k = max(e[1] for e in ev if e[0] == "kasha"); jg = [e[1] for e in ev if e[0] == "jingle"]
+    first_l = min([e[1] for e in ev if e[0] == "linkSnd"] or [1e18]); first_m = min(e[1] for e in ev if e[0] == "multSnd"); gc = [e[1] for e in ev if e[0] == "gachaSfx"]
+    ok("演出が 1(タイプライター)→ジングル→2(パワー溜め)→3(点リール)→4(最終)の順に流れる", len(jg) == 1 and len(gc) == 1 and last_k < jg[0] < first_l <= first_m < gc[0], f"(カシャ最終 {last_k-ev[0][1]:.0f}ms → ジングル {jg[0]-ev[0][1]:.0f} → 最初のつながり {first_l-ev[0][1]:.0f} → 掛け算 {first_m-ev[0][1]:.0f} → 最終 {gc[0]-ev[0][1]:.0f}ms)")
+    ok(f"演出の長さが約12秒以内(測定: アガリから「とじる」まで約 {total_s:.1f}秒)", total_s <= 13.5)
+    fin = pg.evaluate("""()=>{ const r=document.getElementById('sh-reel'), d=won.data, g=d.gs; const st=document.getElementById('sh-stone'), tw=document.getElementById('sh-type');
+      return {txt:r.textContent, pts:+r.dataset.points, expect:g.points, fmt:fmtPts(g.points)+'点', formula:500*g.bonus*g.chain*g.theme, carved:st.classList.contains('carved'), bg:getComputedStyle(st).backgroundColor, col:getComputedStyle(tw).color, typed:tw.textContent, sentence:d.sentence}; }""")
+    pg.screenshot(path=os.path.join(SHOTS, "show_4_final.png"))
+    ok("最終の点が、点の式(500×句ボーナス×連鎖×テーマ)の結果と一致する(演出の最後の表示)", fin["pts"] == round(fin["expect"]) and fin["txt"] == fin["fmt"] and round(fin["formula"]) == round(fin["expect"]), str(fin)[:140])
+    ok("文字は金色、背景は石碑(図鑑の青緑がかった年代物の石 #7d9d96)。打った全文が、石碑の上に残る", fin["col"] == "rgb(242, 193, 78)" and fin["bg"] == "rgb(125, 157, 150)" and fin["carved"] and fin["sentence"] in fin["typed"], f"(文字色 {fin['col']} / 背景 {fin['bg']})")
+    ok("「チーン」の音が無い(行末のベルを入れていない)", "チーン" not in html and pg.evaluate("()=>String(kasha)+String(jingle)").count("チーン") == 0)
+    # 打った内容: 名前つき役(+N淫)が打たれ、飾りは打たれない
+    typed = fin["typed"]
+    ok("打った内容: 全文のあとに、名前つき役の名前(+N淫つき)。飾り(0淫)は打たない", "淫" in typed and not any(k in typed for k in ("可愛い声", "獣の声", "ぶっかけ")) and "+0" not in typed, typed[:80])
+    # --- スキップ: 途中でタップ → 最終の点と碑文が出る ---
+    pg.evaluate(SHOWSETUP, [h13, draw_tile]); pg.wait_for_timeout(100)
+    pg.wait_for_timeout(2200); pg.screenshot(path=os.path.join(SHOTS, "show_2_typing_midway.png"))
+    pg.mouse.click(160, 400); pg.wait_for_timeout(700)
+    sk = pg.evaluate("""()=>{ const r=document.getElementById('sh-reel'); return {done:!document.getElementById('sh-close').hidden, pts:+r.dataset.points, expect:Math.round(won.data.gs.points), carved:document.getElementById('sh-stone').classList.contains('carved'), typed:document.getElementById('sh-type').textContent.length}; }""")
+    ok("スキップ(画面のどこかをタップ)しても、最終の点と碑文(金文字の全文・刻み込み)が表示される", sk["done"] and sk["pts"] == sk["expect"] and sk["carved"] and sk["typed"] > 10, str(sk))
+    # パワー溜めの途中の画面(スクリーンショット)
+    pg.evaluate(SHOWSETUP, [h13, draw_tile]); pg.wait_for_timeout(100)
+    for _ in range(160):
+        if pg.evaluate("()=>document.querySelectorAll('#sh-svg line').length>=2"): break
+        pg.wait_for_timeout(100)
+    pg.screenshot(path=os.path.join(SHOTS, "show_3_power.png"))
+    pg.mouse.click(160, 400); pg.wait_for_timeout(500)
     pg.screenshot(path="/tmp/proto_320.png")
     b.close()
 print("エラー:", errs or "なし"); print("すべてOK" if all(res) and not errs else "失敗")

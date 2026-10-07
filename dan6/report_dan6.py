@@ -76,6 +76,57 @@ for k in ("strong", "weak", "aim"):
     P(f"   焦らしプレイ(3連続テンパイ): 1挑戦で1回以上 {ach:.1f}% / 1ゲームあたり {100*sum(c['seq3'] for c in C)/g_all:.2f}%")
 w("stage_pass.csv", ["CPU", "ステージ", "研究♡", "条件", "着いた挑戦数", "突破率%", "挑戦(3ゲーム)の回数", "1挑戦の達成率%"], rows)
 
+
+# ===== 3b. ステージ条件1〜8 × 研究♡0/1/2 の突破率(条件を研究♡を揃えて1つずつ。見送りなし。分母=1挑戦=3ゲーム。各 20,000 挑戦を、2,000ゲームの記録から引き直して推定) =====
+import random as _r
+from sim_dan6 import sat
+P("\n=== 条件1〜8 × 研究♡0/1/2 の突破率(1回の挑戦=3ゲーム以内に条件を満たす確率%。見送りなし。20,000挑戦ずつ) ===")
+rows = []
+for k in ("strong", "weak"):
+    games = POOL[k]["games"]; wins = iter(range(10 ** 9)); rec = {lv: [] for lv in (0, 1, 2)}
+    wi = 0; seq = []
+    for g in games:
+        if g["result"] == "win": seq.append(("win", wi)); wi += 1
+        else: seq.append((g["result"], None))
+    rng = _r.Random(3)
+    tab = {}
+    for lv in (0, 1, 2):
+        ms = POOL[k]["lv"][lv]
+        for c in range(1, 9):
+            ok_ = 0; N = 20000
+            for _ in range(N):
+                used = 0; hit = False
+                while used < 3 and not hit:
+                    res, i = seq[rng.randrange(len(seq))]
+                    if res == "tenpai": continue
+                    used += 1
+                    if res == "win" and sat(ms[i], c): hit = True
+                ok_ += hit
+            tab[(c, lv)] = 100 * ok_ / N
+            rows.append([NAME[k], c, lv, LVN[lv], f"{tab[(c, lv)]:.1f}"])
+    P(f"{NAME[k]}: 条件(行)×研究♡0/1/2(列)")
+    for c in range(1, 9): P(f"   条件{c}「{ {1:'句',2:'節',3:'節でテーマ語3',4:'文',5:'複合テーマ成立',6:'文でテーマ語4',7:'碑文',8:'碑文でテーマ語5'}[c] }」: " + " / ".join(f"{tab[(c, lv)]:.0f}%" for lv in (0, 1, 2)))
+w("cond_by_level.csv", ["CPU", "条件", "研究♡", "呼び名", "3ゲーム以内に満たす確率%"], rows)
+# ===== 3c. 見送りなし・点を狙う・条件を狙い直す の比較(段階クリアを実際に遊んだ結果) =====
+P("\n=== 3つのCPUの比較(段階クリア。各1,000挑戦): 突破率(そのステージに着いた挑戦のうち、いつかクリアした割合) と 平均到達ステージ ===")
+cmp_rows = []
+for k, nm in (("strong", "見送りなし(強CPU)"), ("aim", "点を狙うCPU"), ("seek", "条件を狙い直すCPU")):
+    if k not in LIVE: continue
+    C = LIVE[k]; reach = collections.Counter(); clr = collections.Counter()
+    for c in C:
+        seen = set()
+        for s_, ok in c["attempts"]:
+            seen.add(s_); clr[s_] += ok
+        for s_ in seen: reach[s_] += 1
+    rc = [c["reached"] for c in C]
+    P(f"{nm}: 平均到達ステージ {statistics.mean(rc):.2f} / 突破率 " + " ".join(f"{s_}:{100*clr[s_]/reach[s_]:.0f}%" for s_ in range(1, 9) if reach[s_]))
+    cmp_rows.append([nm, f"{statistics.mean(rc):.2f}"] + [f"{100*clr[s_]/reach[s_]:.1f}" if reach[s_] else "" for s_ in range(1, 9)])
+w("stage_compare.csv", ["CPU", "平均到達ステージ"] + [f"ステージ{i}突破率%" for i in range(1, 9)], cmp_rows)
+if "seek" in LIVE:
+    G_ = [g for c in LIVE["seek"] for g in c["games"]]; played = [g for g in G_ if g["result"] != "tenpai"]; sk = [g for g in played if g["skips"]]
+    rew = [g for g in sk if g["result"] == "win"]; sat_after = [g for g in rew if g["sat"]]
+    P(f"条件を狙い直すCPU: 見送りを使ったゲーム {100*len(sk)/len(played):.1f}% / 見送ったあとに再びアガれた {100*len(rew)/len(sk):.1f}% / 再アガリで条件を満たした {100*len(sat_after)/max(1,len(rew)):.1f}%(見送った全ゲームの {100*len(sat_after)/len(sk):.1f}%) / ノーテン扱い {100*sum(1 for g in sk if g['skipfail'])/len(sk):.1f}%")
+
 # ===== 4. 見送り(点を狙うCPUのみ) =====
 if "aim" in LIVE:
     P("\n=== 見送り(点を狙うCPU。見送り回数: 研究♡0=1 / 1=2 / 2=3回、1回の挑戦(3ゲーム)で共有) ===")
