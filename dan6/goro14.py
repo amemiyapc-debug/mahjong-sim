@@ -1,4 +1,4 @@
-"""dan6 語呂度エンジン(goro/goro.py・goro2.py・goro3.py の移植)。語のタグは data/word_tags_v1.csv。
+"""dan6 語呂度エンジン(goro/goro.py・goro2.py・goro3.py の移植。点 = 500 × 句ボーナス(1+Σつながり+Σ名前つき役の淫) × 連鎖 × テーマ)。語のタグは data/word_tags_v1.csv。
 アガリ手(4語+雀頭)を score() に渡すと、つながり・連鎖・テーマ・点を返す。
 パラメータ P(語呂度の変種): thresh(しきい値、既定3)、thresh_add({(スロット,スロット): 加算}。そのスロット対だけしきい値を上げる)。"""
 import csv, os, itertools, collections
@@ -16,12 +16,14 @@ CL = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8}
 FLOOR = 500
 SLOT_NAMES = ['前置き', '感情・誘い', '部位', '行為', '音', '反応', '喘ぎ声']
 STAGE_NAMES = {1: '語', 2: '句', 3: '節', 4: '文', 5: '碑文'}
-KEN = {1: 4, 2: 3, 3: 2}                       # 研究♡の段階 -> しきい値(仮)
+LV_NAMES = ['無知', '恥ずかしい', 'すけべ']      # 研究♡の呼び名(内部の数値は 0/1/2)
+KEN = {0: 4, 1: 3, 2: 2}                       # 研究♡ -> 語呂のしきい値(仮)。上がると、新しい語呂が「解放」される
+SKIPS = {0: 1, 1: 2, 2: 3}                     # 研究♡ -> 見送り回数(仮。1ステージの全ゲームで共有)
 
 
 def ken_stage(stage):
-    """ステージ番号 -> 研究♡の段階(1〜2=第一、3〜5=第二、6以降=第三)"""
-    return 1 if stage <= 2 else 2 if stage <= 5 else 3
+    """ステージ番号 -> 研究♡(ステージ1〜2=0 無知、3〜5=1 恥ずかしい、6以降=2 すけべ)"""
+    return 0 if stage <= 2 else 1 if stage <= 5 else 2
 
 
 def _stem(r):
@@ -119,7 +121,7 @@ def link(a, b, P=None):
         sa, sb = sb, sa
     if sa == sb:
         sub = lambda r: r['sub'].replace('雀頭・', '')
-        base = SAME_SUB.get((sub(a), sub(b)), 1)
+        base = SAME_SUB.get((sub(a), sub(b))) or SAME_SUB.get((sub(b), sub(a))) or 1       # 語の順に依存しないよう、両方向を引く(参照実装 goro.py は片方向のみ)
     else:
         base = BASE.get((sa, sb), 0)
     for x, y in ((a, b), (b, a)):
@@ -241,8 +243,24 @@ def theme_counts(nodes):
     return k, comp
 
 
-def score(words, head, P=None):
-    """words: 語名の4つ、head: 雀頭名(【雀頭】なし)。返り値: dict"""
+def _kazari():
+    p = os.path.join(ROOT, 'dan6', 'yaku_class.csv')
+    return {r['name'] for r in csv.DictReader(open(p, encoding='utf-8-sig')) if r['class'].startswith('飾り')}
+
+
+KAZARI = _kazari()                              # 飾り(12個)は 0淫。演出と図鑑にだけ使う
+
+
+def yaku_in(S, r):
+    """名前つき役の淫の合計。r = Scorer.score() の結果。同じ group は tier 最大の1つだけ(Scorer が処理済み)、
+    合体は成立した合体1つの淫(元の役の淫の合計+1/+2)で、元の役は二重に数えない。飾りは0淫。
+    形の1翻(旧)は、淫には含めない。"""
+    mh = {m['name']: int(m['han_provisional']) for m in S.M}
+    return sum(h for n, h in r['added'].items() if n in r['yaku'] and n not in KAZARI) + sum(mh[n] for n in r['merges'])
+
+
+def score(words, head, P=None, yin=0):
+    """words: 語名の4つ、head: 雀頭名(【雀頭】なし)、yin: 名前つき役の淫の合計。返り値: dict"""
     nodes = [node(w) for w in words] + [node(head, True)]
     L = []
     for a, b in itertools.combinations(nodes, 2):
@@ -252,11 +270,11 @@ def score(words, head, P=None):
     C = collapse(nodes, L)
     m, comp = _chain_count(nodes, C)
     ch = mult(m)
-    bonus = 1 + sum(min(3, s - 2) for a, b, s in C)
+    bonus = 1 + sum(min(3, s - 2) for a, b, s in C) + yin     # 句ボーナス = 1 + Σつながり + Σ名前つき役の淫
     tm, tn, k = best_theme(nodes)
     size = max([c[0] for c in comp.values()] + [1])            # つながった語の数の最大(語1・句2・節3・文4・碑文5)
     kk, compo = theme_counts(nodes)
-    return dict(links=len(C), raw_links=len(L), merges=m, chain=ch, bonus=bonus, theme=tm, theme_name=tn, theme_k=kk,
+    return dict(links=len(C), raw_links=len(L), merges=m, chain=ch, bonus=bonus, yin=yin, theme=tm, theme_name=tn, theme_k=kk,
                 composite=compo, size=size, stage_name=STAGE_NAMES[size],
                 points=FLOOR * bonus * ch * tm, pairs=C)
 
@@ -275,3 +293,21 @@ def fmt_points(p):
                 s = s[:-2]
             return s + nm
     return str(p)
+
+
+def best_hand(S, hand, P=None):
+    """14牌の手の、点が最大の分割。アガリでなければ None。S = yaku14.Scorer。
+    返り値: score() の dict + words/head(名前)・yaku(名前つき役の名前)・kazari(飾り)・yaku_merges(成立した名前つき合体)・yin・points_noyaku(名前つき役を外した同じ分割の点)"""
+    best = None
+    for ws, h, oho, chu in S.judge.partitions(hand):
+        r = S.score(ws, h, oho)
+        names = [S.W[i]['word'] for i in ws]
+        head = S.H[h]['head']
+        yin = yaku_in(S, r)
+        sc = score(names, head, P, yin)
+        k = (sc['points'], yin)
+        if best is None or k > best[0]:
+            sc0 = score(names, head, P, 0)
+            best = (k, dict(sc, words=names, head=head, yaku=[n for n in r['yaku'] if n not in KAZARI], kazari=[n for n in r['yaku'] if n in KAZARI],
+                            yaku_merges=r['merges'], points_noyaku=sc0['points']))
+    return best[1] if best else None

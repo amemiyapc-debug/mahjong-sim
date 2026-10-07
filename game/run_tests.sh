@@ -15,7 +15,7 @@ node test_efficiency.js 400 | head -1
 python3 ../tests/test_core_v13m.py --dir dan5 --n 6000 | tail -5
 python3 ../dan5/test_prototype.py | tail -2
 echo "### dan6 の辞書(../dan6)で、判定の照合"
-python3 ../dan6/gen.py | tail -3; python3 ../tests/test_dan6_gen.py | tail -1; python3 ../tests/test_goro14.py | tail -1
+python3 ../dan6/gen.py | tail -3; python3 ../tests/test_dan6_gen.py | tail -1; python3 ../tests/test_goro14.py | tail -1; python3 ../tests/test_skip.py | tail -1
 HM_DATA_DIR=../dan6 HM_MODX=0.05 python3 make_data.py
 for t in test_mono test_tatsu; do echo "== $t: $(node $t.js | tail -1)"; done
 for t in test_parity test_parity_sample; do echo "== $t: $(HM_DIRNAME=dan6 HM_REGEN=1 node $t.js | tail -1)"; done

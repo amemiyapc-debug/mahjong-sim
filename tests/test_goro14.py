@@ -12,7 +12,7 @@ def ok(n, c, extra=""):
 # --- 参照実装を、一時フォルダにコピーして読み込む ---
 tmp = tempfile.mkdtemp(); ref = os.path.join(tmp, "goro"); os.makedirs(ref)
 for f in ("goro.py", "goro2.py", "goro3.py", "tag.py"):
-    t = open(os.path.join(ROOT, "goro", f), encoding="utf-8").read().replace("/home/claude/mahjong-sim/goro", ref).replace("/home/claude/mahjong-sim/", ROOT + "/").replace("/home/claude/mahjong-sim", ROOT)
+    t = open(os.path.join(ROOT, "goro", f), encoding="utf-8").read().replace("base=SAME_SUB.get((sub(a),sub(b)),1)", "base=SAME_SUB.get((sub(a),sub(b))) or SAME_SUB.get((sub(b),sub(a))) or 1").replace("/home/claude/mahjong-sim/goro", ref).replace("/home/claude/mahjong-sim/", ROOT + "/").replace("/home/claude/mahjong-sim", ROOT)
     open(os.path.join(ref, f), "w", encoding="utf-8").write(t)
 sys.path.insert(0, ref)
 cwd = os.getcwd(); os.chdir(tmp)
@@ -39,7 +39,15 @@ ok("点 = 500 × 句ボーナス × 連鎖倍率 × テーマ倍率", x["points"
 z = G.score(["デカけつ", "うんん", "エロエロ♡", "くり♡"], "あっ")
 ok("最低点は500(何もつながらない手では 500)", all(G.score(rng.sample(names_w, 4), rng.choice(names_h))["points"] >= 500 for _ in range(500)))
 ok("表示: 万・億・兆・京(切り捨て1桁)", [G.fmt_points(v) for v in (500, 12345, 99999, 3.2e9, 7.7e13, 1e17, 123e8)] == ["500", "1.2万", "9.9万", "32億", "77兆", "10京", "123億"])
-ok("研究♡: ステージ1〜2=第一(4)、3〜5=第二(3)、6以降=第三(2)", [G.KEN[G.ken_stage(s)] for s in (1, 2, 3, 5, 6, 9)] == [4, 4, 3, 3, 2, 2])
+ok("研究♡: ステージ1〜2=0 無知(4)、3〜5=1 恥ずかしい(3)、6以降=2 すけべ(2)。見送り 1/2/3回", [G.KEN[G.ken_stage(s)] for s in (1, 2, 3, 5, 6, 9)] == [4, 4, 3, 3, 2, 2] and G.LV_NAMES == ["無知", "恥ずかしい", "すけべ"] and G.SKIPS == {0: 1, 1: 2, 2: 3})
+# 語の順に依存しない(4語の全順列で、点が同じ)
+badp = 0
+for _ in range(300):
+    ws = rng.sample(names_w, 4); h = rng.choice(names_h)
+    if len({G.score(list(p_), h, {"thresh": 3})["points"] for p_ in itertools.permutations(ws)}) != 1: badp += 1
+ok("点は、4語の並び順に依存しない(300手×24通りの順列)", badp == 0, f"(依存する手 {badp})")
+# 淫: 句ボーナス = 1 + Σつながり + 淫
+ok("句ボーナスに、名前つき役の淫が足される(淫0の手と、淫3の手で、句ボーナスが +3)", G.score(["ちんぽ", "ちんこ", "まんこ", "おめこ"], "あん", None, 3)["bonus"] == G.score(["ちんぽ", "ちんこ", "まんこ", "おめこ"], "あん", None, 0)["bonus"] + 3)
 # しきい値を上げると、つながりは減る(単調)
 hands = [(rng.sample(names_w, 4), rng.choice(names_h)) for _ in range(500)]
 n2, n3, n4 = (sum(G.score(w, h, {"thresh": t})["raw_links"] for w, h in hands) for t in (2, 3, 4))

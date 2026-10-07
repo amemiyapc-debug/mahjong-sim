@@ -324,7 +324,10 @@ class Game:
         res = max((self.hint(ci, sup) for ci in cand), key=lambda x: x[0])
         return self.actual_discard(hand, res[1]), False
 
-    def play(self, rng):
+    def play(self, rng, skip=None):
+        """1ゲーム。skip(hand, turn, r) -> bool を渡すと、アガリが成立したときに「見送る」かを決められる(dan6)。
+        見送ると、cpu の捨て牌選びで1枚捨てて13牌に戻り、残りのツモで続ける。残りのツモ内に完成しなければ「ノーテン扱い」(skipfail=True)。
+        ツモ上限 L では見送れない(残りのツモが0)。"""
         wall = self.wall0[:]
         rng.shuffle(wall)
         wc = Counter(wall)
@@ -333,21 +336,30 @@ class Game:
             wc[t] -= 1
         first_tenpai = None
         tenpai = False
+        skipped = 0
         for turn in range(1, self.L + 1):
             t = wall.pop()
             wc[t] -= 1
             hand.append(t)
             r = self.S.best(hand)
             if r:
+                if skip is not None and turn < self.L and skip(list(hand), turn, r):
+                    skipped += 1
+                    disc, tenpai = self.choose(hand, wc)
+                    hand.remove(disc)
+                    continue
                 if first_tenpai is None or first_tenpai >= turn:
                     first_tenpai = turn - 1
                 return dict(result="win", turn=turn, han=r["han"], han_no_merge=r["han_no_merge"], yaku=r["yaku"],
-                            merges=r["merges"], raw=r["raw"], words=r["words"], head=r["head"], tenpai=first_tenpai)
+                            merges=r["merges"], raw=r["raw"], words=r["words"], head=r["head"], tenpai=first_tenpai,
+                            hand=list(hand), skipped=skipped)
             disc, tenpai = self.choose(hand, wc)
             hand.remove(disc)
             if tenpai and first_tenpai is None:
                 first_tenpai = turn
-        return dict(result="tenpai" if tenpai else "noten", turn=self.L, tenpai=first_tenpai)
+        if skipped:
+            return dict(result="noten", turn=self.L, tenpai=None, skipped=skipped, skipfail=True)
+        return dict(result="tenpai" if tenpai else "noten", turn=self.L, tenpai=first_tenpai, skipped=0)
 
 
 _G = None

@@ -56,22 +56,20 @@ with sync_playwright() as p:
     # ---- dan6 の追加 ----
     html = open(os.path.join(ROOT, "prototype", "hiragana_tap_prototype.html"), encoding="utf-8").read()
     ok("はじめての語ボーナスが、どこにもない(計算・表示・演出カード・保存データ)", "newWords" not in html and "はじめての語" not in html and "NEW</span>" not in html)
+    body = "\n".join(l for l in html.split("\n") if not l.startswith("const DATA="))
+    ok("画面・演出・図鑑・コメントに「翻」の文字が残っていない(検索)", "翻" not in body and "翻" not in html, "")
+    ok("点の表(翻→点)・満貫制の記述が残っていない", "function pts(" not in html and "満貫" not in html and "RANK(" not in html)
     f = pg.evaluate("()=>[fmtPts(500),fmtPts(12345),fmtPts(99999),fmtPts(32e8),fmtPts(77e12),fmtPts(1e17),fmtPts(123e8)]")
     ok("大きな点の表示(万・億・兆・京)", f == ["500", "1.2万", "9.9万", "32億", "77兆", "10京", "123億"], str(f))
     r = pg.evaluate("""()=>{ localStorage.removeItem(HI_KEY); const a=updateHi(8000), b=updateHi(5000), c=updateHi(12000); return [a,b,c,loadHi()]; }""")
     ok("ハイスコアが記録され、高い点でだけ更新される", r[0]["hi"]==8000 and not r[1]["isNew"] and r[1]["hi"]==8000 and r[2]["hi"]==12000 and r[3]==12000, str(r))
-    # 14牌のアガリ手を作って、アガリ画面(evalWin)に、ボーナス行・NEW が出ず、ハイスコアが出る
-    pg.evaluate("""()=>{ reset(); localStorage.removeItem(HI_KEY); let id=5000; const T=l=>({id:id++,label:l});
-      const grp=(kind,name,labs)=>({k:'group',kind,name,text:name,tiles:labs.map(T)});
-      items=[ grp('meld','ちんぽ',['ち','ん','ぽ']), grp('meld','ぬれまん',['ぬれ','ま','ん']), grp('meld','ぱこぱこ',['ぱ','こ','×2']), grp('meld','いくう',['い','く','う']), grp('head','あん',['あ','ん']) ]; tsumoId=items[items.length-1].tiles[1].id; render(); }""")
-    r = pg.evaluate("()=>{ won={kept:0,total:5,data:null}; try{ const d=evalWin(); return {ok:true,total:d.total,hi:d.hi,html:(()=>{won={data:d,kept:0,total:0};return winHTML();})(),own:d.own.sc.total}; }catch(e){return {ok:false,err:String(e)}} }")
-    ok("evalWin がエラーなく動く(辞書365語)", r["ok"], str(r)[:200])
-    if r["ok"]:
-        ok("アガリ画面: ボーナス行なし・翻=役の合計(裏読み込み)・ハイスコア表示", "はじめての" not in r["html"] and "ハイスコア" in r["html"] and r["total"]>=r["own"], str(r["total"]) + "翻")
-    # Python(yaku14.py)と、試作HTMLの判定の照合: 同じ14牌で、最大翻・成立した役が一致するか
+    ok("研究♡の呼び名 0=無知 / 1=恥ずかしい / 2=すけべ、しきい値 4/3/2、ステージ 1-2→0 / 3-5→1 / 6〜→2、見送り 1/2/3回",
+       pg.evaluate("()=>[LVN,KEN,SKIPN,[1,2,3,5,6,9].map(lvOf)]") == [["無知", "恥ずかしい", "すけべ"], [4, 3, 2], [1, 2, 3], [0, 0, 1, 1, 2, 2]])
+    # ---- Python(yaku14.py・goro14.py)と、試作HTMLの照合 ----
     import random, itertools, csv, collections
-    sys.path.insert(0, ROOT)
+    sys.path.insert(0, ROOT); sys.path.insert(0, HERE)
     from yaku14 import Scorer
+    import goro14 as G6
     S = Scorer(HERE)
     rng = random.Random(20261007)
     def mk(ws, h):
@@ -80,7 +78,6 @@ with sync_playwright() as p:
         t += S.H[h]["tiles"].split("|")
         return t
     hands = [mk(rng.sample(range(len(S.W)), 4), rng.randrange(len(S.H))) for _ in range(400)]
-    # 役が付きやすい手も混ぜる: 同じ部位・同じ語幹を多めに
     byslot = collections.defaultdict(list)
     for i, w in enumerate(S.W): byslot[w["part"]].append(i)
     for part, ids in byslot.items():
@@ -92,23 +89,67 @@ with sync_playwright() as p:
     js = pg.evaluate("""(hands)=>hands.map(h=>{ const parts=allPartitions(DICT,h,500); let best=null; const oho=h.filter(l=>l==='ぉ゛').length;
         for(const p of parts){ const ws=p.melds.map(m=>WI.get(m.word.name)),hd=HI.get(p.head.name); const sc=scoreHand(ws,hd,oho,true); if(!best||sc.total>best.total)best={total:sc.total,names:sc.items.map(x=>x.name)}; }
         return best; })""", hands)
-    cmp_ = lambda: [(i, py[i], js[i]) for i in range(len(hands)) if (py[i] is None) != (js[i] is None) or (py[i] and js[i] and py[i][0] != js[i]["total"])]
-    bad0 = cmp_()
-    print(f"   [確認事項] 試作HTMLの構造型3役(二色・ばらばら・多色)は、game/core.js・yaku14.py と判定が違う(修飾3型の語の扱い)。そのままの不一致: {len(bad0)}/{len(hands)}手")
-    # 構造型3役を、core.js / yaku14.py と同じ判定に差し替えて照合(これ以外の役・分割・合体・翻の選択が、Python と完全一致するかの確認)
-    js = pg.evaluate("""(hands)=>{ const ST=['distinct_stems','distinct_modifiers','modifier_pairs'];
-      for(const r of YR){ if(!ST.includes(r.ct))continue; const y=DATA.Y.find(x=>x[0]===r.name); const kv=kvOf(y[4]);
-        if(r.ct==='distinct_stems')r.f=(ws,hd,full)=>full&&ws.every(w=>WA[w].stem)&&new Set(ws.map(w=>WA[w].stem)).size===4;
-        if(r.ct==='distinct_modifiers')r.f=(ws,hd,full)=>{if(!full||!ws.every(w=>WA[w].mods.length>=1))return false;const tk=[];ws.forEach(w=>WA[w].mods.forEach(m=>tk.push(m)));return new Set(tk).size===tk.length;};
-        if(r.ct==='modifier_pairs')r.f=(ws,hd,full)=>{if(!full||!ws.every(w=>WA[w].mods.length===1))return false;const c={};ws.forEach(w=>{const m=WA[w].mods[0];c[m]=(c[m]||0)+1;});return Object.values(c).filter(v=>v===2).length===+kv.pairs;};
-      }
-      return hands.map(h=>{ const parts=allPartitions(DICT,h,500); let best=null; const oho=h.filter(l=>l==='ぉ゛').length;
-        for(const p of parts){ const ws=p.melds.map(m=>WI.get(m.word.name)),hd=HI.get(p.head.name); const sc=scoreHand(ws,hd,oho,true); if(!best||sc.total>best.total)best={total:sc.total,names:sc.items.map(x=>x.name)}; }
-        return best; }); }""", hands)
-    bad = cmp_()
-    ok(f"構造型3役を同じ判定にすると、Python(yaku14.py)と試作HTMLの最大翻が一致({len(hands)}手)", not bad, f"(不一致 {len(bad)}: {bad[:2]})")
+    bad = [(i, py[i], js[i]) for i in range(len(hands)) if (py[i] is None) != (js[i] is None) or (py[i] and js[i] and py[i][0] != js[i]["total"])]
+    ok(f"構造型3役(二色・ばらばら・多色)を含め、Python(yaku14.py)と試作HTMLの最大(形1+役+合体)が一致({len(hands)}手)", not bad, f"(不一致 {len(bad)}: {bad[:2]})")
     covered = set(y for p_ in py if p_ for y in p_[1])
     print("   照合した手で成立した役の種類:", len(covered), "/ 87")
+    # 淫・点: 点が最大の分割(Python goro14.best_hand)と、試作HTMLの全分割の最大が、研究♡0/1/2で一致
+    exp = {lv: [G6.best_hand(S, h, {"thresh": G6.KEN[lv]}) for h in hands] for lv in (0, 1, 2)}
+    jsp = pg.evaluate("""(hands)=>[0,1,2].map(lv=>hands.map(h=>{ const parts=allPartitions(DICT,h,500); let best=null; const oho=h.filter(l=>l==='ぉ゛').length;
+        for(const p of parts){ const ws=p.melds.map(m=>WI.get(m.word.name)),hd=HI.get(p.head.name); const sc=scoreHand(ws,hd,oho,true);
+          const g=g6score(ws.map(w=>DICT.words[w].name),DICT.heads[hd].name,lv,sc.yin); const k=[g.points,sc.yin]; if(!best||k[0]>best.points||(k[0]===best.points&&k[1]>best.yin))best={points:g.points,yin:sc.yin,size:g.size,chainN:g.chainN,theme:g.theme}; }
+        return best; }))""", hands)
+    for lv in (0, 1, 2):
+        badp = [(i, exp[lv][i]["points"], jsp[lv][i]["points"]) for i in range(len(hands)) if exp[lv][i]["points"] != jsp[lv][i]["points"] or exp[lv][i]["yin"] != jsp[lv][i]["yin"]]
+        ok(f"研究♡{lv}(しきい値{G6.KEN[lv]}): 点・淫が、Python(goro14.py)と試作HTMLで一致({len(hands)}手)", not badp, f"(不一致 {len(badp)}: {badp[:2]})")
+    # 受け入れ例: つながり(強さ4→+2)が1本、名前つき役が2淫と1淫の手 → 句ボーナス = 1+2+3 = 6 → 連鎖・テーマが無ければ 500×6 = 3,000点
+    cand = None
+    for _ in range(200000):
+        ws = rng.sample([w["word"] for w in S.W], 4); h = rng.choice([x["head"] for x in S.H])
+        x = G6.score(ws, h, {"thresh": 3}, 0)
+        if x["links"] == 1 and x["linkBonus"] if False else (x["links"] == 1 and x["bonus"] == 3 and x["chain"] == 1.0 and x["theme"] == 1):
+            cand = (ws, h); break
+    ws, h = cand
+    x3 = G6.score(ws, h, {"thresh": 3}, 3)
+    j3 = pg.evaluate("([ws,h])=>{const g=g6score(ws,h,1,3);return [g.bonus,g.points];}", [ws, h])
+    ok(f"受け入れ例: つながり(強さ4→+2)1本+淫3(2淫+1淫) → 句ボーナス 6 → 3,000点(Python {x3['bonus']}・{x3['points']:.0f} / 試作HTML {j3[0]}・{j3[1]})",
+       x3["bonus"] == 6 and x3["points"] == 3000 and j3 == [6, 3000], str(ws) + h)
+    ok("名前つき役が無い手は、淫0 → 従来(dan6)の式と同じ点(Python・試作HTML)", G6.score(ws, h, {"thresh": 3}, 0)["points"] == 500 * 3 and pg.evaluate("([ws,h])=>g6score(ws,h,1,0).points", [ws, h]) == 1500)
+    # ---- ステージ制・見送り(手作りの例) ----
+    SETUP = """([dk,labels])=>{ STG.stage=1; STG.game=1; STG.lives=3; STG.streak=0; STG.msg=''; newTry(); dealRandom(); items=labels.map(l=>({k:'tile',tile:mk(l)})); deck=dk.slice(); draws=0; won=null; over=false; choice=false; skipMode=false; pendingWin=null; skipCount=0; render(); draw(); return {choice,won:!!won,skips:STG.skips,stage:STG.stage}; }"""
+    base13 = ['ち', 'ん', 'ぽ', 'ぬれ', 'ま', 'ん', 'ぱ', 'こ', '×2', 'い', 'く', 'あ', 'ん']      # ちんぽ・ぬれまん・ぱこぱこ + 雀頭あん + いく(う待ち)
+    st = pg.evaluate(SETUP, [['う', 'う', 'う'], base13])
+    ok("見送りの選択: アガリ形になると「アガる/見送る」が出る(研究♡0=見送り1回。まだアガリ画面は出ない)", st["choice"] and not st["won"] and st["skips"] == 1, str(st))
+    ok("選択中の画面に ボタン「アガる」「見送る(残り1回)」と、いまの点が出る", pg.evaluate("()=>{const t=document.getElementById('actions').textContent;return t.includes('アガる')&&t.includes('見送る(残り1回)')&&t.includes('点');}"))
+    # 見送り→再アガリ: 「う」を捨て、次の「う」でまたアガる(見送り回数は0なので、そのままアガリ)
+    pg.evaluate("()=>{ act('miokuri'); }")
+    r = pg.evaluate("()=>({skipMode, n:flat().length, skips:STG.skips, skipCount, choice, msg})")
+    ok("見送る→手牌が14枚のままほどけて、捨て牌の選択になる(見送り残り0)", r["skipMode"] and r["n"] == 14 and r["skips"] == 0 and r["skipCount"] == 1 and not r["choice"], str(r))
+    pg.evaluate("()=>{ const t=flat().find(x=>x.label==='う'); sel=[t.id]; act('discard'); }")
+    pg.wait_for_timeout(300)
+    r = pg.evaluate("()=>({won:!!won, data:!!(won&&won.data), st:won&&won.data&&won.data.st, pts:won&&won.data&&won.data.gs.points, stage:STG.stage, skipCount})")
+    ok("見送り→再アガリ: 次のツモ(う)でまたアガリ。点が計算され、ステージが更新される", r["won"] and r["data"] and r["pts"] >= 500 and r["skipCount"] == 1, str(r))
+    # 見送り→流局→ノーテン扱い
+    st = pg.evaluate(SETUP, [['う'] + ['ほ'] * 20, base13])
+    pg.evaluate("()=>{ act('miokuri'); const t=flat().find(x=>x.label==='う'); sel=[t.id]; act('discard'); for(let i=0;i<40&&!over;i++){ const t=tileById(tsumoId); if(!t)break; sel=[t.id]; act('discard'); } }")
+    r = pg.evaluate("()=>({over, won:!!won, msg:STG.msg, game:STG.game, streak:STG.streak, draws, html:document.getElementById('win').innerHTML})")
+    ok("見送り→流局: ノーテン扱い(0点・1ゲーム消費・連続テンパイはリセット)", r["over"] and not r["won"] and "ノーテン扱い" in r["msg"] and r["game"] == 2 and r["streak"] == 0 and "ノーテン扱い" in r["html"], str(r)[:200])
+    # 「アガる」を選ぶ(つながりのある手: ぬれくり・まんこ・見せべろ・うしろ+あっ。り待ち)
+    link13 = ['ぬれ', 'く', 'ま', 'ん', 'こ', '見せ', 'べ', 'ろ', 'う', 'し', 'ろ', 'あ', 'っ']
+    st = pg.evaluate(SETUP, [['り'], link13])
+    ok("つながりのある手でも、アガリ形で選択が出る(見送り1回)", st["choice"] and st["skips"] == 1, str(st))
+    pg.evaluate("()=>act('agaru')"); pg.wait_for_timeout(300)
+    r = pg.evaluate("()=>({won:!!won, st:won&&won.data&&won.data.st, game:STG.game, stage:STG.stage, size:won&&won.data&&won.data.gs.size, pts:won&&won.data&&won.data.gs.points})")
+    clear = r["size"] is not None and r["size"] >= 2
+    ok("アガる: アガリ画面が出て、条件(句=2語以上つながる)の判定とステージの更新が一致する", r["won"] and r["pts"] >= 500 and (("クリア" in r["st"]) == clear) and (r["stage"] == (2 if clear else 1)), str(r))
+    # 見送れない: ツモ上限(残りツモ0)・練習配牌
+    st = pg.evaluate("""()=>{ dealRandom(); items=%s.map(l=>({k:'tile',tile:mk(l)})); deck=['う']; draws=LMAX-0; won=null; over=false; choice=false; render(); draw(); return {choice,over,won:!!won}; }""" % str(base13).replace("'", '"'))
+    ok("ツモ上限(残りのツモ0)では、そもそもツモできず流局(見送りは選べない)", st["over"] and not st["choice"], str(st))
+    st = pg.evaluate("""()=>{ dealPractice(); items=%s.map(l=>({k:'tile',tile:mk(l)})); deck=['う']; draws=0; won=null; over=false; choice=false; render(); draw(); return {choice,won:!!won,practice}; }""" % str(base13).replace("'", '"'))
+    ok("練習配牌では見送りの選択は出ない(ステージ制の対象外)", st["won"] and not st["choice"] and st["practice"], str(st))
+    # 研究♡が上がったときの表示(ステージ2クリア→3で 0→1)
+    r = pg.evaluate("""()=>{ dealRandom(); STG.stage=2; STG.game=1; STG.lives=3; newTry(); const gs={size:5,themeK:3,composite:[]}; const m=commitWin(gs); return {stage:STG.stage,news:STG.news,bar:stageBarHTML()}; }""")
+    ok("研究♡が上がる(無知→恥ずかしい): 「新しい語呂が見えるようになった」が表示される", r["stage"] == 3 and "新しい語呂が見えるようになった" in r["news"] and "恥ずかしい" in r["bar"] and "新しい語呂が見えるようになった" in r["bar"], r["news"])
     pg.screenshot(path="/tmp/proto_320.png")
     b.close()
 print("エラー:", errs or "なし"); print("すべてOK" if all(res) and not errs else "失敗")

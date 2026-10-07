@@ -23,6 +23,9 @@ data = {
     "Y": [[y["name"], y["group"], int(y["tier"] or 0), y["condition_type"], y["params"], int(y["han_provisional"])] for y in Y],
     "M": [[m["name"], m["source_yaku"].split("|"), int(m["han_provisional"])] for m in M],
     "SL": SL,
+    "GR": {r["word"]: [int(r["slot_no"]), r["slot"], r["sub"], r["読み"], r["部位"], r["トーン"], r["命令の係り先"], r["種別"]]
+           for r in csv.DictReader(open(os.path.join(ROOT, "data", "word_tags_v1.csv"), encoding="utf-8-sig"))},
+    "KZ": sorted(r["name"] for r in rd("yaku_class.csv") if r["class"].startswith("飾り")),
 }
 # 山の牌の順(プロトタイプの C は、牌の字→枚数。ぉ゛・×2 を含む)
 p = os.path.join(ROOT, "prototype", "hiragana_tap_prototype.html")
@@ -67,7 +70,11 @@ s = re.sub(r"v1\.3m の語277・雀頭27・新しい牌の枚数\(山294枚\)", 
 # ---- dan6 の追加 ----
 def sub1(old, new):
     global s
+    if "/* dan6:b */" in s:                                       # proto_patch2 まで適用済み
+        return
     if new in s and (old not in s or old in new):                 # 適用済み(何度実行しても同じ結果)
+        return
+    if old not in s and "/* dan6:goro */" in s:                    # proto_patch2 で書き換え済みの箇所
         return
     assert old in s, "dan6 パッチが当たらない: " + old[:50]
     s = s.replace(old, new, 1)
@@ -89,7 +96,8 @@ FMT = ("function fmtPts(p){p=Math.floor(p);const U=[[1e16,'京'],[1e12,'兆'],[1
        "const HI_KEY=\"hm-proto-hiscore\";\n"
        "function loadHi(){try{return Number(localStorage.getItem(HI_KEY)||0);}catch(e){return 0;}}\n"
        "function updateHi(p){const old=loadHi();if(p>old){try{localStorage.setItem(HI_KEY,String(p));}catch(e){}return {hi:p,isNew:old>0||p>0};}return {hi:old,isNew:false};}\n")
-sub1("function pts(h){", FMT + "function pts(h){")
+if "function fmtPts(" not in s:
+    sub1("function pts(h){", FMT + "function pts(h){")
 sub1("const entry={id:Date.now()", "const hiR=updateHi(pts(total));const entry={id:Date.now()")
 sub1("ura,total,near,", "ura,total,hi:hiR,near,")
 sub1("<h2>アガリ! ${d.total}翻 / ${pts(d.total)}点</h2>", "<h2>アガリ! ${d.total}翻 / ${fmtPts(pts(d.total))}点</h2><div class=\"hint\">ハイスコア ${fmtPts(d.hi.hi)}点${d.hi.isNew?\" ★更新!\":\"\"}</div>")
@@ -108,5 +116,8 @@ NEWC = ('    case"count_same_stem_any":{const n=+kv.n,ps=new Set(kv.parts.split(
         '    case"head_flavor_set":{const a=inset(kv.set),n=+kv.min;R=a;f=(ws,hd)=>hd>=0&&HA[hd].type==="喘ぎ声"&&HA[hd].flavor===kv.flavor&&cnt(a,ws)>=n;break;}\n')
 NEWC += '    case"count_same_part":{const n=+kv.n;const arr=PARTS.map(pt=>selTok("part:"+pt));R=union(arr);f=ws=>arr.some(a=>cnt(a,ws)>=n);break;}\n'
 sub1('    default:throw new Error("未対応の条件: "+ct);', NEWC + '    default:throw new Error("未対応の条件: "+ct);')
+sys.path.insert(0, HERE)
+import proto_patch2
+s = proto_patch2.apply(s)
 open(p, "w", encoding="utf-8").write(s)
 print("試作HTMLを更新: 語", len(W), "役", len(Y), "合体", len(M), "山", sum(data["C"].values()), "枚")
