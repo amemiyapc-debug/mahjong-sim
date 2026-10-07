@@ -14,7 +14,7 @@ from yaku14 import Scorer
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--dir", default=os.path.join(HERE, "..", "v13m"))
-ap.add_argument("--core-dir", default="/tmp/claude-0/v13zip")
+ap.add_argument("--core-dir", default=os.path.join(HERE, ".."))
 ap.add_argument("--n", type=int, default=10000)
 ap.add_argument("--seed", type=int, default=20261006)
 ap.add_argument("--no-patch", action="store_true",
@@ -115,7 +115,7 @@ if not a.no_patch:
     src = src.replace(old, new)
     core = os.path.join(_td0, "core.js")
     open(core, "w", encoding="utf-8").write(src)
-data = dict(words=[{k: w[k] for k in ("word", "type", "modifier", "modifiers", "position", "stem", "tiles", "part", "tag", "flavor")} for w in W],
+data = dict(words=[{k: w[k] for k in ("word", "type", "modifier", "modifiers", "position", "stem", "tiles", "part", "tag", "flavor") + (("slot_no",) if "slot_no" in w else ())} for w in W],
             yaku=[{k: y[k] for k in ("name", "group", "tier", "condition_type", "params", "han_provisional")} for y in Y],
             heads=[{k: h[k] for k in ("head", "tiles", "type", "flavor", "stem")} for h in H],
             variants=list(csv.DictReader(open(os.path.join(a.dir, "tile_variants.csv"), encoding="utf-8-sig"))),
@@ -187,15 +187,24 @@ ix = S.widx
 def sc(words, head="あん"):
     hi = next(i for i, h in enumerate(H) if h["head"] == head)
     return S.score([ix[w] for w in words], hi, 0)
-r = sc(["ぱかあ", "くぱあ", "ぱかっ", "ちんぽ"])
-ok("擬音3語: 全開フルオープン(5)が付き、ぱっくり(2)は group で消える", "全開フルオープン" in r["yaku"] and "ぱっくり" not in r["added"] and "ぱっくり" in r["raw"])
-r = sc(["ぱかあ", "くぱあ", "まんこ", "ちんぽ"])
-ok("ぱっくり+ご開帳 → 大開帳(5翻)。1+5+(ほか)", "大開帳" in r["merges"] and "ぱっくり" not in r["yaku"] and "ご開帳" not in r["yaku"])
-base = r["han_no_merge"]
-ok("  合体の差分 = 5 - (2+2) = +1", r["han"] - base == 1)
-# group で消えていた役が元の合体: ぱかあ・くぱあ・ぱかっ・まんこ → 全開フルオープン(5)、ぱっくり(0)、ご開帳(2)。大開帳は 5-(0+2)=+3
-r = sc(["ぱかあ", "くぱあ", "ぱかっ", "まんこ"])
-ok("ぱっくりが group で消えていても、合体は成立し、差分は 5-(0+2)=+3", "大開帳" in r["merges"] and r["han"] - r["han_no_merge"] >= 3)
+_names = {y["name"] for y in Y}
+if "全開フルオープン" in _names:                       # v13m / dan5 の定義(擬音3語の役と group)
+    r = sc(["ぱかあ", "くぱあ", "ぱかっ", "ちんぽ"])
+    ok("擬音3語: 全開フルオープン(5)が付き、ぱっくり(2)は group で消える", "全開フルオープン" in r["yaku"] and "ぱっくり" not in r["added"] and "ぱっくり" in r["raw"])
+    r = sc(["ぱかあ", "くぱあ", "まんこ", "ちんぽ"])
+    ok("ぱっくり+ご開帳 → 大開帳(5翻)。1+5+(ほか)", "大開帳" in r["merges"] and "ぱっくり" not in r["yaku"] and "ご開帳" not in r["yaku"])
+    base = r["han_no_merge"]
+    ok("  合体の差分 = 5 - (2+2) = +1", r["han"] - base == 1)
+    # group で消えていた役が元の合体: ぱかあ・くぱあ・ぱかっ・まんこ → 全開フルオープン(5)、ぱっくり(0)、ご開帳(2)。大開帳は 5-(0+2)=+3
+    r = sc(["ぱかあ", "くぱあ", "ぱかっ", "まんこ"])
+    ok("ぱっくりが group で消えていても、合体は成立し、差分は 5-(0+2)=+3", "大開帳" in r["merges"] and r["han"] - r["han_no_merge"] >= 3)
+else:                                                # dan6: 擬音の役は ぱっくり(1翻)・ご開帳(2翻)の1本化。全開フルオープンは削除。group はない
+    r = sc(["ぱかあ", "くぱあ", "ぱかっ", "ちんぽ"])
+    ok("dan6: 擬音3語に 全開フルオープン は付かない(削除)。ぱっくり(部位語1+擬音1)は付く", "全開フルオープン" not in _names and "ぱっくり" in r["raw"])
+    r = sc(["ぱかあ", "くぱあ", "まんこ", "ちんぽ"])
+    ok("ぱっくり+ご開帳 → 大開帳(元の翻の合計3 + 1 = 4翻)。ぱっくり・ご開帳は単独では数えない", "大開帳" in r["merges"] and "ぱっくり" not in r["yaku"] and "ご開帳" not in r["yaku"])
+    base = r["han_no_merge"]
+    ok("  合体の差分 = 4 - (1+2) = +1", r["han"] - base == 1)
 ok("合体は最大 %d つ" % S.merge_limit, all(len(S.score(ws, hi, oho)["merges"]) <= S.merge_limit for h in hands[:300] for ws, hi, oho, c in S.judge.partitions(h)))
 # 合体の元の役は、2つの合体に重複しない
 dup = 0

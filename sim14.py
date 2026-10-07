@@ -297,6 +297,14 @@ class Game:
         cpu='exact': テンパイになる捨て牌があれば、待ち牌が最も多いものを選ぶ(強め)。"""
         sup = self.supply(wc)
         interps = self.interpretations(hand)
+        if self.cpu == "weak":                                       # dan6: 山の残りを見ない(どの牌も同じ枚数あるとみなす)。待ちの判定だけ実際の山
+            flat = {t: 3 for t in sup}
+            cand = [interps[0]] if len(interps) == 1 else [interps[0], interps[-1]]
+            res = max((self.hint(ci, flat) for ci in cand), key=lambda x: x[0])
+            disc = self.actual_discard(hand, res[1])
+            rest = list(hand)
+            rest.remove(disc)
+            return disc, self.is_tenpai(rest, sup)
         if self.cpu == "hint":
             cand = [interps[0]] if len(interps) == 1 else [interps[0], interps[-1]]
             res = max((self.hint(ci, sup) for ci in cand), key=lambda x: x[0])

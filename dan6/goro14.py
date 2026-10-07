@@ -1,0 +1,277 @@
+"""dan6 語呂度エンジン(goro/goro.py・goro2.py・goro3.py の移植)。語のタグは data/word_tags_v1.csv。
+アガリ手(4語+雀頭)を score() に渡すと、つながり・連鎖・テーマ・点を返す。
+パラメータ P(語呂度の変種): thresh(しきい値、既定3)、thresh_add({(スロット,スロット): 加算}。そのスロット対だけしきい値を上げる)。"""
+import csv, os, itertools, collections
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE = {(0, 1): 1, (0, 2): 3, (0, 3): 1, (1, 2): 2, (1, 3): 2, (1, 5): 1, (1, 6): 1, (2, 3): 3, (2, 4): 2, (2, 5): 2, (2, 6): 1,
+        (3, 4): 2, (3, 5): 3, (3, 6): 1, (4, 5): 2, (4, 6): 1, (5, 6): 3}
+SAME_SUB = {('高まり', '絶頂・結末'): 2, ('感情・状況', '命令・誘い'): 1, ('行為', 'キス・吸い'): 1}
+MODS = ['見せ', 'デカ', 'エロ', 'ぬれ', '媚び', '舐め', 'コキ', '穴', '♡', '×2']
+ALIAS = {'まめ': 'くり', 'おまめ': 'くり', 'すじ': 'くり'}
+COMP = [('くりでイく', 'くり', '絶頂'), ('まんでイく', '部位:女性器', '絶頂'), ('ちんでイく', '部位:男性器', '絶頂'),
+        ('胸でイく', '部位:胸', '絶頂'), ('お尻でイく', '部位:後ろ', '絶頂'), ('口でイく', '部位:口', '絶頂'),
+        ('ラブキス', 'キス', 'ラブ'), ('調教', 'SM', '態度'), ('命令調教', 'SM', '命令'), ('濡れ濡れ', 'ぬれ', '水音'), ('見せつけ', '見せ', '絶頂')]
+CL = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8}
+FLOOR = 500
+SLOT_NAMES = ['前置き', '感情・誘い', '部位', '行為', '音', '反応', '喘ぎ声']
+STAGE_NAMES = {1: '語', 2: '句', 3: '節', 4: '文', 5: '碑文'}
+KEN = {1: 4, 2: 3, 3: 2}                       # 研究♡の段階 -> しきい値(仮)
+
+
+def ken_stage(stage):
+    """ステージ番号 -> 研究♡の段階(1〜2=第一、3〜5=第二、6以降=第三)"""
+    return 1 if stage <= 2 else 2 if stage <= 5 else 3
+
+
+def _stem(r):
+    n = r['word'].replace('【雀頭】', '').split('・')[0]
+    for m in MODS:
+        n = n.replace(m, '')
+    n = n.replace('っ', 'つ')
+    n = ALIAS.get(n, n)
+    return n[:2] if len(n) >= 2 else n
+
+
+def _theme(r):
+    if r['part'] and '|' not in r['part']:
+        return r['part']
+    if r['slot_no_eff'] in (5, 6):
+        return '感じる'
+    if r['tone'] in ('SM', 'ラブ'):
+        return r['tone']
+    return ''
+
+
+def _tags(r):
+    t = set()
+    n = r['word'].replace('【雀頭】', '')
+    if r['part'] and '|' not in r['part']:
+        t.add('部位:' + r['part'])
+    if r['sub'] in ('絶頂・結末', '雀頭・快感'):
+        t.add('絶頂')
+    if r['stem'] == 'くり':
+        t.add('くり')
+    if r['sub'] == 'キス・吸い':
+        t.add('キス')
+    if r['tone'] == 'ラブ':
+        t.add('ラブ')
+    if r['tone'] == 'SM':
+        t.add('SM')
+    if r['sub'] == '命令・誘い':
+        t.add('命令')
+    if r['sub'] == '態度':
+        t.add('態度')
+    if r['slot'] == '音':
+        t.add('水音')
+    if 'ぬれ' in n:
+        t.add('ぬれ')
+    if '見せ' in n:
+        t.add('見せ')
+    return t
+
+
+def load(path=None):
+    path = path or os.path.join(ROOT, 'data', 'word_tags_v1.csv')
+    rows = {}
+    for x in csv.DictReader(open(path, encoding='utf-8-sig')):
+        r = dict(word=x['word'], kind=x['種別'], slot_no=int(x['slot_no']), slot=x['slot'], sub=x['sub'], reading=x['読み'],
+                 part=x['部位'], tone=x['トーン'], target=x['命令の係り先'])
+        # 略称の雀頭は一行の最後(スロット6)に置く(goro.py と同じ)
+        r['slot_no_eff'] = 6 if (r['kind'] == '雀頭' and '略称' in r['sub']) else r['slot_no']
+        r['stem'] = _stem(r)
+        r['theme'] = _theme(r)
+        r['tags'] = _tags(r)
+        rows[r['word']] = r
+    return rows
+
+
+ROWS = load()
+
+
+def node(name, head=False):
+    return ROWS[('【雀頭】' + name) if head else name]
+
+
+def _parts(p):
+    return set(p.split('|')) if p else set()
+
+
+def pscore(a, b):
+    A, B = _parts(a), _parts(b)
+    if not A or not B:
+        return 0
+    if A & B:
+        return 2
+    bodies = {'女性器', '後ろ', '口'}
+    if ('穴' in A and B & bodies) or ('穴' in B and A & bodies):
+        return 1
+    return None
+
+
+def link(a, b, P=None):
+    """つながりの強さ(0=つながらない、しきい値以上の整数)"""
+    P = P or {}
+    thresh = P.get('thresh', 3)
+    sa, sb = a['slot_no_eff'], b['slot_no_eff']
+    if sa > sb:
+        a, b = b, a
+        sa, sb = sb, sa
+    if sa == sb:
+        sub = lambda r: r['sub'].replace('雀頭・', '')
+        base = SAME_SUB.get((sub(a), sub(b)), 1)
+    else:
+        base = BASE.get((sa, sb), 0)
+    for x, y in ((a, b), (b, a)):
+        if x['target'] and x['slot_no_eff'] < y['slot_no_eff'] and x['target'] == y['slot']:
+            base = max(base, 3)
+    if base == 0:
+        return 0
+    p = pscore(a['part'], b['part'])
+    if p is None:
+        return 0
+    ta, tb = a['tone'], b['tone']
+    t = 0
+    if ta and tb:
+        if ta == tb:
+            t = 1
+        elif {ta, tb} == {'ラブ', 'SM'}:
+            return 0
+    ra, rb = a['reading'], b['reading']
+    ph = 1 if (ra[-1:] == rb[:1] or rb[-1:] == ra[:1] or ra[:1] == rb[:1] or ra[-1:] == rb[-1:]) else 0
+    sc = base + p + t + ph
+    if sa == sb and p == 0 and base < 2:
+        return 0
+    return sc if sc >= thresh + P.get('thresh_add', {}).get((sa, sb), 0) else 0
+
+
+def link2(a, b, P=None):
+    """goro2.link: 同語幹・同テーマの加点(同スロット: 同語幹4・同テーマ3、別スロット: 同語幹+2)"""
+    s = link(a, b, P)
+    same = a['slot_no_eff'] == b['slot_no_eff']
+    if a['tone'] and b['tone'] and {a['tone'], b['tone']} == {'ラブ', 'SM'}:
+        return 0
+    if same:
+        if a['stem'] == b['stem'] and a['stem']:
+            s = max(s, 4)
+        elif a['theme'] and a['theme'] == b['theme']:
+            s = max(s, 3)
+    else:
+        if a['stem'] == b['stem'] and a['stem']:
+            s = s + 2 if s else 3
+    return s
+
+
+def collapse(nodes, L):
+    names = [n['word'] for n in nodes]
+    slot = {n['word']: n['slot_no_eff'] for n in nodes}
+    par = {n: n for n in names}
+
+    def f(x):
+        while par[x] != x:
+            par[x] = par[par[x]]
+            x = par[x]
+        return x
+    inner = [(a, b, s) for a, b, s in L if slot[a] == slot[b]]
+    for a, b, s in inner:
+        par[f(a)] = f(b)
+    seen = {}
+    for a, b, s in L:
+        if slot[a] == slot[b]:
+            continue
+        k = tuple(sorted((f(a), f(b))))
+        seen[k] = max(seen.get(k, 0), s)
+    return list(inner) + [(k[0], k[1], s) for k, s in seen.items()]
+
+
+def _chain_count(nodes, C):
+    names = [n['word'] for n in nodes]
+    par = {n: n for n in names}
+
+    def f(x):
+        while par[x] != x:
+            par[x] = par[par[x]]
+            x = par[x]
+        return x
+    for a, b, s in C:
+        par[f(a)] = f(b)
+    comp = collections.defaultdict(lambda: [0, 0])
+    for n in names:
+        comp[f(n)][0] += 1
+    for a, b, s in C:
+        comp[f(a)][1] += 1
+    return sum(max(0, e - 1) for n, e in comp.values()), comp
+
+
+def mult(m):
+    x = 1.0
+    for k in range(1, m + 1):
+        x *= 1 + 0.5 * k
+    return x
+
+
+def best_theme(nodes):
+    best = (1, 'なし', 0)
+    c1 = collections.Counter(n['stem'] for n in nodes if n['stem'])
+    c2 = collections.Counter(n['theme'] for n in nodes if n['theme'])
+    for nm, cnt in list(c1.items()) + list(c2.items()):
+        if CL.get(cnt, 1) > best[0]:
+            best = (CL.get(cnt, 1), '単:' + nm, cnt)
+    for nm, A, B in COMP:
+        a = [n for n in nodes if A in n['tags']]
+        b = [n for n in nodes if B in n['tags']]
+        if a and b:
+            k = len({n['word'] for n in a} | {n['word'] for n in b})
+            if CL.get(k, 1) > best[0]:
+                best = (CL.get(k, 1), '複合:' + nm, k)
+    return best
+
+
+def theme_counts(nodes):
+    """単独テーマ(同語幹・同テーマ)の最大語数、複合テーマが成立しているか"""
+    c1 = collections.Counter(n['stem'] for n in nodes if n['stem'])
+    c2 = collections.Counter(n['theme'] for n in nodes if n['theme'])
+    k = max([0] + list(c1.values()) + list(c2.values()))
+    comp = []
+    for nm, A, B in COMP:
+        a = [n for n in nodes if A in n['tags']]
+        b = [n for n in nodes if B in n['tags']]
+        if a and b:
+            comp.append((nm, len({n['word'] for n in a} | {n['word'] for n in b})))
+    return k, comp
+
+
+def score(words, head, P=None):
+    """words: 語名の4つ、head: 雀頭名(【雀頭】なし)。返り値: dict"""
+    nodes = [node(w) for w in words] + [node(head, True)]
+    L = []
+    for a, b in itertools.combinations(nodes, 2):
+        s = link2(a, b, P)
+        if s:
+            L.append((a['word'], b['word'], s))
+    C = collapse(nodes, L)
+    m, comp = _chain_count(nodes, C)
+    ch = mult(m)
+    bonus = 1 + sum(min(3, s - 2) for a, b, s in C)
+    tm, tn, k = best_theme(nodes)
+    size = max([c[0] for c in comp.values()] + [1])            # つながった語の数の最大(語1・句2・節3・文4・碑文5)
+    kk, compo = theme_counts(nodes)
+    return dict(links=len(C), raw_links=len(L), merges=m, chain=ch, bonus=bonus, theme=tm, theme_name=tn, theme_k=kk,
+                composite=compo, size=size, stage_name=STAGE_NAMES[size],
+                points=FLOOR * bonus * ch * tm, pairs=C)
+
+
+JA_UNITS = [(10 ** 16, '京'), (10 ** 12, '兆'), (10 ** 8, '億'), (10 ** 4, '万')]
+
+
+def fmt_points(p):
+    """大きな点を 万・億・兆・京 で表す(320px 向けに最大でも約10文字)"""
+    p = int(p)
+    for u, nm in JA_UNITS:
+        if p >= u:
+            v = p / u
+            s = ('%.1f' % (int(v * 10) / 10)) if v < 100 else ('%d' % int(v))
+            if s.endswith('.0'):
+                s = s[:-2]
+            return s + nm
+    return str(p)

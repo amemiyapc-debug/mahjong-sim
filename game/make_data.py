@@ -6,7 +6,7 @@ D=os.environ.get("HM_DATA_DIR", os.path.join(HERE,"..","v13m"))+"/"
 rd=lambda n: list(csv.DictReader(open(D+n,encoding="utf-8-sig")))
 W,Y,Hd,V=rd("words.csv"),rd("yaku.csv"),rd("heads.csv"),rd("tile_variants.csv")
 M=rd("yaku_merge.csv") if os.path.exists(D+"yaku_merge.csv") else []   # 合体役(CLAUDE.md §6-7)
-data={"words":[{k:w[k] for k in ("word","type","modifier","modifiers","position","stem","tiles","part","tag","flavor")} for w in W],
+data={"words":[{k:w[k] for k in ("word","type","modifier","modifiers","position","stem","tiles","part","tag","flavor")+(("slot_no",) if "slot_no" in w else ())} for w in W],
       "yaku":[{k:y[k] for k in ("name","group","tier","condition_type","params","han_provisional")} for y in Y],
       "heads":[{k:h[k] for k in ("head","tiles","type","flavor","stem")} for h in Hd],
       "variants":[{k:v[k] for k in ("tile","base","copies","name","mode")} for v in V],
