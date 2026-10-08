@@ -7,6 +7,7 @@ POOL = pickle.load(open(os.path.join(OUT, "pool.pkl"), "rb"))
 LIVE = pickle.load(open(os.path.join(OUT, "live.pkl"), "rb")) if os.path.exists(os.path.join(OUT, "live.pkl")) else {}
 NAME = {"strong": "強CPU", "weak": "弱CPU", "aim": "点を狙うCPU"}
 LVN = G.LV_NAMES
+# 注: この報告は、旧方式(しきい値 KEN[研究♡]、研究♡=ステージ番号で決まる)で測った dan6 の結果(results_dan6/)を読む。20261008-2250 で、研究♡は周回数で決まり、しきい値は一定になった
 fm = G.fmt_points
 buf = io.StringIO()
 def P(*a):
@@ -34,8 +35,8 @@ for k in ("strong", "weak", "aim", "rand"):
         xs = src[k][lv]
         if not xs: continue
         pts = [x["points"] for x in xs]; d = dist(pts); fl = 100 * sum(p == G.FLOOR for p in pts) / len(pts); pr = 100 * sum(x["raw"] for x in xs) / (10 * len(xs))
-        rows.append([NAME.get(k, "無作為の手"), lv, LVN[lv], G.KEN[lv], len(xs), f"{pr:.1f}", f"{fl:.1f}", d["median"], f"{d['mean']:.0f}", d["p90"], d["p99"], d["max"]])
-        P(f"{NAME.get(k,'無作為の手'):<8} 研究♡{lv}「{LVN[lv]}」(しきい値{G.KEN[lv]}) n={len(xs)}: 語の組の接続率{pr:.1f}% 500点止まり{fl:.1f}% {line(d)}")
+        rows.append([NAME.get(k, "無作為の手"), lv, LVN[lv], G.thresh_of(lv, 'table'), len(xs), f"{pr:.1f}", f"{fl:.1f}", d["median"], f"{d['mean']:.0f}", d["p90"], d["p99"], d["max"]])
+        P(f"{NAME.get(k,'無作為の手'):<8} 研究♡{lv}「{LVN[lv]}」(しきい値{G.thresh_of(lv, 'table')}) n={len(xs)}: 語の組の接続率{pr:.1f}% 500点止まり{fl:.1f}% {line(d)}")
 w("goro_by_level.csv", ["CPU", "研究♡", "呼び名", "しきい値", "手数", "語の組の接続率%", "500点止まり%", "中央値", "平均", "上位10%", "上位1%", "最大"], rows)
 
 # ===== 2. 名前つき役(淫) =====
@@ -71,7 +72,7 @@ for k in ("strong", "weak", "aim"):
     P("   ステージ別(突破率=そのステージに着いた挑戦のうち、いつかクリアした割合 / 1挑戦(3ゲーム)達成率=挑戦の1回ごと): " +
       " ".join(f"{s_}:{100*clr[s_]/reach[s_]:.0f}%/{100*att[s_][0]/att[s_][1]:.0f}%" for s_ in range(1, 9) if reach[s_]))
     for s_ in range(1, 9):
-        if reach[s_]: rows.append([NAME[k], s_, lvl := G.ken_stage(s_), min(s_, 8), reach[s_], f"{100*clr[s_]/reach[s_]:.1f}", att[s_][1], f"{100*att[s_][0]/att[s_][1]:.1f}"])
+        if reach[s_]: rows.append([NAME[k], s_, lvl := (0 if s_ <= 2 else 1 if s_ <= 5 else 2), min(s_, 8), reach[s_], f"{100*clr[s_]/reach[s_]:.1f}", att[s_][1], f"{100*att[s_][0]/att[s_][1]:.1f}"])
     ach = 100 * sum(c["ach"] for c in C) / n; g_all = sum(len(c["games"]) for c in C)
     P(f"   焦らしプレイ(3連続テンパイ): 1挑戦で1回以上 {ach:.1f}% / 1ゲームあたり {100*sum(c['seq3'] for c in C)/g_all:.2f}%")
 w("stage_pass.csv", ["CPU", "ステージ", "研究♡", "条件", "着いた挑戦数", "突破率%", "挑戦(3ゲーム)の回数", "1挑戦の達成率%"], rows)

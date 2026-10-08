@@ -58,7 +58,7 @@ def main():
             for ws, h, oho, chu in parts[i]:
                 nm = [read[names[j]] for j in ws]; hd = J.heads[h]["head"]
                 r = Sc.score([Sc.widx[n] for n in nm], next(k for k, x in enumerate(Sc.H) if x["head"] == hd), oho)
-                best = max(best, G.score(nm, hd, {"thresh": G.KEN[lv]}, G.yaku_in(Sc, r))["points"])
+                best = max(best, G.score(nm, hd, G.params(lv), G.yaku_in(Sc, r))["points"])
             pts[lv].append(best)
     out["points"] = {}
     for lv in (0, 1, 2):

@@ -39,7 +39,18 @@ ok("点 = 500 × 句ボーナス × 連鎖倍率 × テーマ倍率", x["points"
 z = G.score(["デカけつ", "うんん", "エロエロ♡", "くり♡"], "あっ")
 ok("最低点は500(何もつながらない手では 500)", all(G.score(rng.sample(names_w, 4), rng.choice(names_h))["points"] >= 500 for _ in range(500)))
 ok("表示: 万・億・兆・京(切り捨て1桁)", [G.fmt_points(v) for v in (500, 12345, 99999, 3.2e9, 7.7e13, 1e17, 123e8)] == ["500", "1.2万", "9.9万", "32億", "77兆", "10京", "123億"])
-ok("研究♡: ステージ1〜2=0 無知(4)、3〜5=1 恥ずかしい(3)、6以降=2 すけべ(2)。見送り 1/2/3回", [G.KEN[G.ken_stage(s)] for s in (1, 2, 3, 5, 6, 9)] == [4, 4, 3, 3, 2, 2] and G.LV_NAMES == ["無知", "恥ずかしい", "すけべ"] and G.SKIPS == {0: 1, 1: 2, 2: 3})
+ok("研究♡は周回数で決まる: 1周目=0 無知、2周目=1 恥ずかしい、3周目以降=2 すけべ。見送り 1/2/3回", [G.ken_lap(l) for l in (1, 2, 3, 4, 9)] == [0, 1, 2, 2, 2] and G.LV_NAMES == ["無知", "恥ずかしい", "すけべ"] and G.SKIPS == {0: 1, 1: 2, 2: 3} and not hasattr(G, "ken_stage"))
+ok("しきい値: 既定(const)は研究♡によらず一定の3。KEN は削除されず、table に切り替えると 4/3/2", [G.thresh_of(l) for l in (0, 1, 2)] == [3, 3, 3] and G.KEN == {0: 4, 1: 3, 2: 2} and [G.thresh_of(l, "table") for l in (0, 1, 2)] == [4, 3, 2] and G.params(1)["thresh"] == 3)
+# --- 解禁表(data/score_unlock.csv)---
+_rg = random.Random(5)
+HW, HH = next((w, h) for w, h in ((_rg.sample(names_w, 4), _rg.choice(names_h)) for _ in range(5000)) if G.score(w, h)["chain"] > 1 and G.score(w, h)["theme"] > 1)   # 連鎖もテーマも効く手
+a0, a1, a2 = (G.score(HW, HH, G.params(l), 3, 2.0) for l in (0, 1, 2))
+ok("研究♡0: 和了点は基本点(500)のみ。縁・淫・句の倍率・連鎖・テーマが何であっても", a0["points"] == 500 and a0["chain"] > 1 and a0["theme"] > 1 and a0["en"] > 0, f"(判定値 縁{a0['en']} 連鎖{a0['chain']} テーマ{a0['theme']})")
+ok("研究♡1: 縁・淫・句の倍率だけが入る。連鎖倍率とテーマ倍率は入らない", a1["points"] == 500 * (1 + a1["en"] + 3) * 2.0 and a1["points"] < a1["points_full"] and a1["chain"] == a2["chain"] > 1, f"(縁{a1['en']} 点{a1['points']} 全部入り{a1['points_full']})")
+ok("研究♡2: すべて入る", a2["points"] == 500 * (1 + a2["en"] + 3) * a2["chain"] * a2["theme"] * 2.0 == a2["points_full"])
+ok("研究♡0でも、縁・連鎖・テーマの成立判定は行われる(点にならないだけ)", a0["links"] == a2["links"] > 0 and a0["merges"] == a2["merges"] and a0["theme"] == a2["theme"] and a0["bonus_full"] == a2["bonus_full"])
+ok("解禁表: lv未指定(P=None)は全部入り(従来の式と同じ)", G.score(HW, HH, None, 3)["points"] == G.score(HW, HH, None, 3)["points_full"])
+ok("周回数を変えると点の計算が変わる(同じ手: 1周目 500、2周目 縁・淫まで、3周目 全部)", [G.score(HW, HH, G.params(G.ken_lap(l)), 3)["points"] for l in (1, 2, 3)] == [500, a1["points"] / 2, a2["points"] / 2] and a1["points"] > 500 and a2["points"] > 500)
 # 語の順に依存しない(4語の全順列で、点が同じ)
 badp = 0
 for _ in range(300):

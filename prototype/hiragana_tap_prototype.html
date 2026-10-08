@@ -163,7 +163,7 @@ summary{cursor:pointer}
 <body>
 <main>
 <h1>ひらがな麻雀(仮) タップで組む試作</h1>
-<p class="note">dan6 の語365・雀頭28・山361枚で動く試作。名前つき役は「淫」、点 = 500 × 句ボーナス × 連鎖 × テーマ。ステージ制(研究♡0/1/2・見送り)つき(「ランダム配牌」から)。CPUはありません。</p>
+<p class="note">dan6 の語365・雀頭28・山361枚で動く試作。名前つき役は「淫」、解読点 = 500 × 句ボーナス × 連鎖 × テーマ。ステージ制(研究♡0/1/2・見送り)つき(「ランダム配牌」から)。CPUはありません。</p>
 <div class="panel">
  <div id="status"></div>
  <div id="stagebar" class="hint" style="margin:4px 0"></div>
@@ -365,14 +365,20 @@ const HI_KEY="hm-proto-hiscore";
 function loadHi(){try{return Number(localStorage.getItem(HI_KEY)||0);}catch(e){return 0;}}
 function updateHi(p){const old=loadHi();if(p>old){try{localStorage.setItem(HI_KEY,String(p));}catch(e){}return {hi:p,isNew:old>0||p>0};}return {hi:old,isNew:false};}
 /* dan6:goro *//* dan6:b */
-// ===== 語呂度・連鎖・テーマ・点(dan6/goro14.py の移植。点 = 500 × 句ボーナス × 連鎖倍率 × テーマ倍率) =====
+// ===== 語呂度・連鎖・テーマ・点(dan6/goro14.py の移植。解読点(内部名: points) = 500 × 句ボーナス × 連鎖倍率 × テーマ倍率。研究♡で解禁された項目だけが入る) =====
 const G6={BASE:{"0,1":1,"0,2":3,"0,3":1,"1,2":2,"1,3":2,"1,5":1,"1,6":1,"2,3":3,"2,4":2,"2,5":2,"2,6":1,"3,4":2,"3,5":3,"3,6":1,"4,5":2,"4,6":1,"5,6":3},
  SAME:{"高まり|絶頂・結末":2,"感情・状況|命令・誘い":1,"行為|キス・吸い":1},
  MODS:["見せ","デカ","エロ","ぬれ","媚び","舐め","コキ","穴","♡","×2"],ALIAS:{"まめ":"くり","おまめ":"くり","すじ":"くり"},
  COMP:[["くりでイく","くり","絶頂"],["まんでイく","部位:女性器","絶頂"],["ちんでイく","部位:男性器","絶頂"],["胸でイく","部位:胸","絶頂"],["お尻でイく","部位:後ろ","絶頂"],["口でイく","部位:口","絶頂"],["ラブキス","キス","ラブ"],["調教","SM","態度"],["命令調教","SM","命令"],["濡れ濡れ","ぬれ","水音"],["見せつけ","見せ","絶頂"]],
  CL:{1:1,2:1,3:2,4:4,5:8},FLOOR:500};
-const LVN=["無知","恥ずかしい","すけべ"],KEN=[4,3,2],SKIPN=[1,2,3];   // 研究♡0/1/2: 語呂のしきい値(仮)・見送り回数(仮)
-const lvOf=stage=>stage<=2?0:stage<=5?1:2;
+const LVN=["無知","恥ずかしい","すけべ"],KEN=[4,3,2],SKIPN=[1,2,3];   // 研究♡0/1/2: 旧方式の語呂のしきい値 KEN(削除しない)・見送り回数(仮)
+const KEN_MODE="const",KEN_CONST=3;                                       // data/score_config.csv。const=研究♡によらず一定(暫定3)、table=旧KEN
+const thOf=lv=>KEN_MODE==="table"?KEN[lv]:KEN_CONST;
+const UNLOCK={base:[1,1,1],en:[0,1,1],yaku:[0,1,1],phrase:[0,1,1],chain:[0,0,1],theme:[0,0,1]};   // data/score_unlock.csv(研究♡0/1/2)
+const LAP_KEN=[[1,0],[2,1],[3,2]];                                         // data/lap_config.csv: 周回数 -> 研究♡(3周目以降=2)
+function kenLap(lap){let k=LAP_KEN[0][1];for(const [l,v] of LAP_KEN)if(lap>=l)k=v;return k;}
+let LAP=1;try{const q=+new URLSearchParams(location.search).get("lap");if(q>=1)LAP=Math.floor(q);}catch(e){}   // 周回数。?lap=2 で指定
+const lvOf=_stage=>kenLap(LAP);   // 研究♡は周回数で決まる。ステージ番号では変わらない(20261008-2250)
 const G6ROW=new Map();
 function g6mk(name,r){
   const kind=r[7],slotNo=r[0],sub=r[2],part=r[4],tone=r[5];
@@ -446,11 +452,11 @@ function g6theme(nodes){
 }
 // words: 語名4つ、head: 雀頭名、lv: 研究♡(0/1/2)、yin: 名前つき役の淫の合計(裏読みを含む)
 function g6score(words,head,lv,yin){
-  const th=KEN[lv],nodes=words.map(g6word).concat([g6head(head)]),L=[];
+  const th=thOf(lv),u=k=>UNLOCK[k][lv],nodes=words.map(g6word).concat([g6head(head)]),L=[];
   for(let i=0;i<5;i++)for(let j=i+1;j<5;j++){const s=g6link2(nodes[i],nodes[j],th);if(s)L.push([nodes[i].word,nodes[j].word,s]);}
   const C=g6collapse(nodes,L),ch=g6chain(nodes,C),mult=g6mult(ch.m),th2=g6theme(nodes);
-  const link=C.reduce((s,x)=>s+Math.min(3,x[2]-2),0),bonus=1+link+yin;
-  return {links:C.length,rawLinks:L.length,chainN:ch.m,chain:mult,bonus,linkBonus:link,yin,theme:th2.mult,themeName:th2.name,themeK:th2.k,composite:th2.comp,size:ch.size,pairs:C,points:G6.FLOOR*bonus*mult*th2.mult};
+  const linkFull=C.reduce((s,x)=>s+Math.min(3,x[2]-2),0),link=linkFull*u('en'),yinA=yin*u('yaku'),bonus=1+link+yinA,chA=u('chain')?mult:1,tmA=u('theme')?th2.mult:1;
+  return {lv,linkFull,chainFull:mult,themeFull:th2.mult,yinApplied:yinA,links:C.length,rawLinks:L.length,chainN:ch.m,chain:chA,bonus,linkBonus:link,yin,theme:tmA,themeName:th2.name,themeK:th2.k,composite:th2.comp,size:ch.size,pairs:C,points:u('base')?G6.FLOOR*bonus*chA*tmA:0};
 }
 const KZ=new Set(DATA.KZ),yv=y=>KZ.has(y.name)?0:y.han;   // 飾りは0淫
 const STAGE_WORD=["","語","句","節","文","碑文"];
@@ -561,17 +567,18 @@ function nearSwap(ws,hd,oho,satNames){
 let nid=1,infoWord=-1;
 let choice=false,skipMode=false,pendingWin=null,skipCount=0,practice=true;   // 見送りの選択中・見送ったあとの捨て牌選び・見送ったか・練習配牌
 const STG={stage:1,game:1,lives:3,skips:SKIPN[0],streak:0,news:"",msg:""};   // ステージ制(3ゲーム/ステージ・ライフ3)
+function setLap(v){LAP=+v;newTry();STG.msg="周回を"+LAP+"周目にした(研究♡「"+LVN[lvOf(0)]+"」)";try{render();}catch(e){}}
 function newTry(){STG.game=1;STG.skips=SKIPN[lvOf(STG.stage)];}
 function consumeGame(){STG.game++;if(STG.game>3){STG.lives--;if(STG.lives<=0){const st=STG.stage;STG.stage=1;STG.lives=3;newTry();return " → ライフ0。ゲームオーバー(ステージ"+st+"まで)。ステージ1から";}newTry();return " → 3ゲーム使い切り。ライフ-1(残り"+STG.lives+")。ステージ"+STG.stage+"をやり直し";}return "(ゲーム "+(STG.game-1)+"/3 を消費)";}
 function commitWin(gs){const c=Math.min(STG.stage,8),lv=lvOf(STG.stage),ok=g6sat(gs,c);STG.streak=0;let m="条件「"+CONDN[c]+"」を"+(ok?"達成!":"満たせなかった");
   if(ok){const done=STG.stage;STG.stage++;const nl=lvOf(STG.stage);m+=" → ステージ"+done+"クリア!";newTry();if(nl>lv){STG.news="研究♡が「"+LVN[nl]+"」に上がった! 新しい語呂が見えるようになった";try{toast(STG.news);}catch(e){}}}
   else m+=consumeGame();STG.msg=m;return m;}
 function isTenpai13(){const labs=flat().map(t=>t.label);for(const l of new Set(deck))if(allPartitions(DICT,labs.concat([l]),1).length)return true;return false;}
-function onOver(){if(practice)return;let m;if(skipCount>0){STG.streak=0;m="見送ったあと、完成しなかったので、ノーテン扱い(0点・1ゲーム消費)"+consumeGame();}
+function onOver(){if(practice)return;let m;if(skipCount>0){STG.streak=0;m="見送ったあと、完成しなかったので、ノーテン扱い(0解読点・1ゲーム消費)"+consumeGame();}
   else if(isTenpai13()){STG.streak++;m="テンパイ流局(ゲームは消費しない)"+(STG.streak>=3?" ・焦らしプレイ "+STG.streak+"連続!":" ・連続テンパイ "+STG.streak);}
   else{STG.streak=0;m="ノーテン(1ゲーム消費)"+consumeGame();}STG.msg=m;}
 function stageBarHTML(){if(practice)return '<span class="hint">練習配牌(ステージ制の対象外)。「ランダム配牌」でステージ制が始まります。</span>';const lv=lvOf(STG.stage),c=Math.min(STG.stage,8);
-  return '<b>ステージ'+STG.stage+'</b> ・研究♡「'+LVN[lv]+'」 ・ゲーム '+STG.game+'/3 ・ライフ '+'♥'.repeat(STG.lives)+' ・見送り 残'+STG.skips+'回<br>条件: '+CONDN[c]+(STG.news?'<br><b class="news">'+STG.news+'</b>':'')+(STG.msg?'<br><small>前のゲーム: '+STG.msg+'</small>':'');}
+  return '<b>ステージ'+STG.stage+'</b> ・<select id="lapsel" onchange="setLap(this.value)" style="font-size:.8rem">'+[1,2,3,4].map(n=>'<option value="'+n+'"'+(n===LAP?' selected':'')+'>'+n+'周目</option>').join('')+'</select> ・研究♡「'+LVN[lv]+'」 ・ゲーム '+STG.game+'/3 ・ライフ '+'♥'.repeat(STG.lives)+' ・見送り 残'+STG.skips+'回<br>条件: '+CONDN[c]+(STG.news?'<br><b class="news">'+STG.news+'</b>':'')+(STG.msg?'<br><small>前のゲーム: '+STG.msg+'</small>':'');}
 let DEFER=true,deck=[],draws=0,sel=[],msg="",won=null,tsumoId=null,over=false,hint=true,HINTS={melds:[],heads:[],dazis:[]},COMPS=[],compIds=new Set();
 const LMAX=12;
 const mk=l=>({id:nid++,label:l});
@@ -769,7 +776,7 @@ function checkWin(){
   const info=parts.map(p=>{const ws=p.melds.map(m=>WI.get(m.word.name)),hd=HI.get(p.head.name),sc=scoreHand(ws,hd,oho,true);
     const gs=g6score(ws.map(w=>DICT.words[w].name),DICT.heads[hd].name,lv,sc.yin);
     return {p,pts:gs.points,yin:sc.yin,mk:p.melds.map(m=>key(m.word.name,m.assigned)),hk:key(p.head.name,p.headAssigned)};});
-  // 自分で組んだ面子・雀頭を、できるだけ多く残したまま、アガリ形にする。残りの牌は、点が最大になる分け方で自動で組む。だめなら、組み替える
+  // 自分で組んだ面子・雀頭を、できるだけ多く残したまま、アガリ形にする。残りの牌は、解読点が最大になる分け方で自動で組む。だめなら、組み替える
   const subsets=[];for(let m=0;m<(1<<melds.length);m++)subsets.push(melds.filter((_,i)=>m&(1<<i)));
   subsets.sort((x,y)=>y.length-x.length);
   let hit=null;
@@ -863,7 +870,7 @@ function evalWin(){
 }
 function itemsHTML(sc){
   const ys=sc.items.filter(x=>x.merge||!KZ.has(x.name)),zs=sc.items.filter(x=>!x.merge&&KZ.has(x.name));
-  let s=ys.length?ys.map(x=>`<div class="sc">${x.merge?"合体 ":""}${x.name} <span class="han">+${x.han}淫</span>${x.merge?` <small>(${x.merge.join("+")}の合体)</small>`:""}</div>`).join(""):`<div class="sc">点に効く名前つき役はありません</div>`;
+  let s=ys.length?ys.map(x=>`<div class="sc">${x.merge?"合体 ":""}${x.name} <span class="han">+${x.han}淫</span>${x.merge?` <small>(${x.merge.join("+")}の合体)</small>`:""}</div>`).join(""):`<div class="sc">解読点に効く名前つき役はありません</div>`;
   if(zs.length)s+=`<div class="tags">${zs.map(x=>`<span class="ktag">${x.name}</span>`).join("")}</div>`;
   return s;
 }
@@ -873,15 +880,15 @@ function winHTML(){
   const d=won.data;
   if(!d)return `<h2>アガリ!</h2><div class="hint">役を数えています…</div>`;
   const g=d.gs;
-  let s=`<h2>アガリ! ${fmtPts(g.points)}点</h2><div class="hint">ハイスコア ${fmtPts(d.hi.hi)}点${d.hi.isNew?" ★更新!":""}</div><div class="hint">点 = 500 × 句ボーナス ${g.bonus}(1 + つながり ${g.linkBonus} + 名前つき役 ${g.yin}淫) × 連鎖 ${g.chain.toFixed(g.chainN?2:0)}(連鎖${g.chainN}) × テーマ ${g.theme}(${g.themeName})。つながりは「${STAGE_WORD[g.size]}」。研究♡「${LVN[d.lv]}」のしきい値 ${KEN[d.lv]}。</div>`;
+  let s=`<h2>アガリ! ${fmtPts(g.points)}解読点</h2><div class="hint">ハイスコア ${fmtPts(d.hi.hi)}解読点${d.hi.isNew?" ★更新!":""}</div><div class="hint">解読点 = 500 × 句ボーナス ${g.bonus}(1 + つながり ${g.linkBonus} + 名前つき役 ${g.yin}淫) × 連鎖 ${g.chain.toFixed(g.chainN?2:0)}(連鎖${g.chainN}) × テーマ ${g.theme}(${g.themeName})。つながりは「${STAGE_WORD[g.size]}」。${LAP}周目・研究♡「${LVN[d.lv]}」(語を結ぶしきい値 ${thOf(d.lv)})。${d.lv<2?"まだ読み解けていない項目は解読点に入りません: "+(d.lv<1?"縁(つながり)・名前つき役の淫・句・":"")+"連鎖・テーマ"+(d.lv<1?"(基本点の500のみ)":"")+"。":""}</div>`;
   s+=`<div class="sc" style="margin-top:6px;font-size:1.1rem;font-weight:900">「${d.sentence}」</div><div class="ig-meta"><span class="ig-lab ${gcls(d.gl.name)}">${d.gl.name}</span>${d.gl.text}${d.linkPairs.length?" ・ しりとり成立! "+d.linkPairs.join(" "):""}</div>`;
   s+=`<div class="sh-btns" style="justify-content:flex-start;margin:6px 0"><button class="b" id="star2">☆ 傑作にする</button><button class="b" id="copy2">コピー</button></div><div class="hint">淫語集に保存しました。</div>`;
   s+=`<div style="margin-top:6px">${itemsHTML(d.own.sc)}</div>`;
-  if(d.firstIn)s+=`<div class="hint" style="margin-top:4px"><b>淫</b>とは: 名前つき役の数字です。句ボーナスに足されて、点が増えます(例: +3淫なら、句ボーナスが +3)。</div>`;
+  if(d.firstIn)s+=`<div class="hint" style="margin-top:4px"><b>淫</b>とは: 名前つき役の数字です。句ボーナスに足されて、解読点が増えます(例: +3淫なら、句ボーナスが +3)。</div>`;
   if(d.ura>0)s+=`<div class="sc">裏読みボーナス <span class="han">+${d.ura}淫</span> <small>(同じ14牌は「${d.best.p.melds.map(m=>readingOf(m.word,m.assigned).split("・")[0]).join("・")}+${d.best.p.head.name}」とも読める)</small></div>`;
   if(d.st)s+=`<div class="sc">ステージ: ${d.st}</div>`;
   if(won.user>won.kept)s+=`<div class="hint rearr" style="margin-top:6px"><b>組み替えました</b>。自分で組んだ ${won.user} 個のうち ${won.kept} 個はそのまま使い、残りは、アガリになる形に組み替えました。</div>`;
-  else if(won.kept<5)s+=`<div class="hint" style="margin-top:6px">自分で組んだ ${won.kept} 個はそのまま。残りの牌は、点が最大になる分け方で自動で組みました。</div>`;
+  else if(won.kept<5)s+=`<div class="hint" style="margin-top:6px">自分で組んだ ${won.kept} 個はそのまま。残りの牌は、解読点が最大になる分け方で自動で組みました。</div>`;
   if(hint&&d.near.length)s+=`<div class="miss" style="margin-top:8px"><b>惜しかった役</b>(1語を替えれば成立)<br>${d.near.slice(0,5).map(e=>e.name+"("+e.han+"淫) ← 「"+DICT.words[e.ex[0].from].name+"」を「"+DICT.words[e.ex[0].to].name+"」に").join("<br>")}</div>`;
   s+=`<div class="sh-btns" style="margin-top:8px"><button class="b" id="replay">演出をもう一度</button></div>`;
   return s;
@@ -918,7 +925,7 @@ function shakeBox(){const b=$$("shbox");b.classList.remove("shake");void b.offse
 function confetti(n,items){if(skipShow)return;const L=items||["♡","✦","ん","ち","ま","♡","★","あ"],C=["#ff6ba0","#ffd43b","#69db7c","#4dabf7","#da77f2","#fff"];for(let i=0;i<n;i++){const s=document.createElement("span");s.className="cf";s.textContent=L[i%L.length];s.style.left=Math.random()*100+"vw";s.style.fontSize=(14+Math.random()*18)+"px";s.style.color=C[i%C.length];s.style.animationDuration=(1.8+Math.random()*1.6)+"s";s.style.animationDelay=(Math.random()*.5)+"s";document.body.appendChild(s);setTimeout(()=>s.remove(),4200);}}
 const rar=h=>h>=5?"r4":h>=3?"r3":h>=2?"r2":"r1";
 /* dan6:show *//* dan6:c */
-// ===== アガリ演出(20261007-1345・1350): タイプライター(4文字/秒・金文字・石碑)→ ジングル → パワー溜め → 点リール → 最終(ガチャ風・碑文に刻む) =====
+// ===== アガリ演出(20261007-1345・1350): タイプライター(4文字/秒・金文字・石碑)→ ジングル → パワー溜め → 解読点リール → 最終(ガチャ風・碑文に刻む) =====
 let STONE_URL=null;
 function stoneURL(){
   if(STONE_URL!==null)return STONE_URL;
@@ -954,8 +961,8 @@ async function reelTo(a,b,ms){
   const steps=skipShow?1:Math.max(3,Math.round(ms/40));
   for(let i=1;i<=steps;i++){const e=1-Math.pow(1-i/steps,3);const v=i===steps?b:a*Math.pow(b/a,e);let t=fmtPts(v);
     if(i<steps)t=t.replace(/\d(?=\D*$)/,()=>String(Math.floor(Math.random()*10)));
-    el.textContent=t+"点";if(!skipShow)SFX.tick();await slShow(40);}
-  el.dataset.points=String(Math.round(b));el.textContent=fmtPts(b)+"点";
+    el.textContent=t+"解読点";if(!skipShow)SFX.tick();await slShow(40);}
+  el.dataset.points=String(Math.round(b));el.textContent=fmtPts(b)+"解読点";
 }
 let slShow=()=>Promise.resolve();
 async function playShow(){
@@ -970,7 +977,7 @@ async function playShow(){
   const st=$$("sh-stone"),gr=$$("sh-graph");st.classList.remove("carved");gr.style.boxShadow="";gr.style.background="";
   const su=stoneURL();if(su)st.style.backgroundImage="url("+su+")";
   $$("sh-title").innerHTML='<span class="bigpop" style="display:inline-block">アガリ!</span>';
-  // 1) タイプライター: 完成した淫語(全文)→ 点に効く名前つき役(+N淫)。1文字 約250ms(1秒に4文字)。打っている間は「カシャ」だけ(メロディなし)
+  // 1) タイプライター: 完成した淫語(全文)→ 解読点に効く名前つき役(+N淫)。1文字 約250ms(1秒に4文字)。打っている間は「カシャ」だけ(メロディなし)
   const typ=$$("sh-type"),lines=[{t:d.sentence,c:"ln"}];
   const ys=sc.items.filter(x=>x.merge||!KZ.has(x.name)).slice().sort((a,b)=>b.han-a.han).map(x=>({t:x.name+" +"+x.han+"淫",c:"ln yk"}));
   if(d.ura>0)ys.unshift({t:"裏読み +"+d.ura+"淫",c:"ln yk"});
@@ -994,14 +1001,14 @@ async function playShow(){
     gr.style.boxShadow="0 0 "+(8+lvl*6)+"px "+col+", inset 0 0 "+(10+lvl*8)+"px "+col+"88";gr.style.background="rgba(155,93,229,"+(0.08+lvl*0.05)+")";
     linkSnd(s);await sl(270);
   }
-  // 掛け算: 句ボーナス → 連鎖倍率 → テーマ倍率。点リールが、掛け算のたびに回る
-  const T=$$("sh-total");T.innerHTML='<div class="reel" id="sh-reel" data-points="500">500点</div>';
+  // 掛け算: 句ボーナス → 連鎖倍率 → テーマ倍率。解読点リールが、掛け算のたびに回る
+  const T=$$("sh-total");T.innerHTML='<div class="reel" id="sh-reel" data-points="500">500解読点</div>';
   const MC=["#7b2cbf","#b5179e","#f72585"],steps=[["句ボーナス",g.bonus],["連鎖",g.chain],["テーマ",g.theme]];let cur=G6.FLOOR;
   for(let i=0;i<3;i++){const [nm,f]=steps[i];const e=document.createElement("span");e.className="mc";e.style.setProperty("--mc",MC[i]);e.textContent=nm+" ×"+fx(f);$$("sh-mults").appendChild(e);multSnd(i);
     const nv=cur*f;await reelTo(cur,nv,f>1?350:120);cur=nv;}
-  // 4) 最終: ガチャ風のキラキラ。最終の点が確定し、金文字の全文が碑文に刻み込まれる
+  // 4) 最終: ガチャ風のキラキラ。最終の解読点が確定し、金文字の全文が碑文に刻み込まれる
   gachaSfx();flashScreen();shakeBox();confetti(40);
-  T.innerHTML='<div class="reel big bigpop" id="sh-reel" data-points="'+Math.round(g.points)+'">'+fmtPts(g.points)+'点</div><small>500 × 句ボーナス '+g.bonus+' × 連鎖 '+fx(g.chain)+' × テーマ '+g.theme+'</small>'+(d.st?'<br><small>'+d.st+'</small>':'');
+  T.innerHTML='<div class="reel big bigpop" id="sh-reel" data-points="'+Math.round(g.points)+'">'+fmtPts(g.points)+'解読点</div><small>500 × 句ボーナス '+g.bonus+' × 連鎖 '+fx(g.chain)+' × テーマ '+g.theme+'</small>'+(d.st?'<br><small>'+d.st+'</small>':'');
   st.classList.add("carved");await sl(1000);
   skipShow=false;showRunning=false;$$("sh-skip").hidden=true;$$("sh-close").hidden=false;$$("sh-ingo").hidden=false;refreshStar();
 }catch(e){if(e!==CANCEL)throw e;}
@@ -1047,7 +1054,7 @@ function renderIngo(){
   const shown=(ingoFilter==="star"?l.filter(x=>x.star):l).slice(0,40);
   if(!shown.length)s+=`<div class="hint">${ingoFilter==="star"?"★を付けた淫語は、まだありません。":"まだ、ありません。アガると、ここに溜まります。"}</div>`;
   shown.forEach(e=>{
-    s+=`<div class="ig-card ${e.star?"star":""}"><div class="ig-meta"><b>${esc2(e.title)}</b> ・ ${e.han}淫 ${fmtPts(e.pts)}点</div><div class="ig-sent">${esc2(e.sent)}</div><div class="ig-meta"><span class="ig-lab ${gcls(e.label)}">${esc2(e.label)}</span>${esc2(e.note)}${e.link&&e.link.length?" ・ しりとり: "+esc2(e.link.join(" "))+"!":""}</div><div class="ig-btns"><button class="b" data-iga="star" data-igid="${e.id}">${e.star?"★ 傑作":"☆ 傑作にする"}</button><button class="b" data-iga="copy" data-igid="${e.id}">コピー</button><button class="b" data-iga="del" data-igid="${e.id}">削除</button></div></div>`;
+    s+=`<div class="ig-card ${e.star?"star":""}"><div class="ig-meta"><b>${esc2(e.title)}</b> ・ ${e.han}淫 ${fmtPts(e.pts)}解読点</div><div class="ig-sent">${esc2(e.sent)}</div><div class="ig-meta"><span class="ig-lab ${gcls(e.label)}">${esc2(e.label)}</span>${esc2(e.note)}${e.link&&e.link.length?" ・ しりとり: "+esc2(e.link.join(" "))+"!":""}</div><div class="ig-btns"><button class="b" data-iga="star" data-igid="${e.id}">${e.star?"★ 傑作":"☆ 傑作にする"}</button><button class="b" data-iga="copy" data-igid="${e.id}">コピー</button><button class="b" data-iga="del" data-igid="${e.id}">削除</button></div></div>`;
   });
   s+=`<h3 style="font-size:.85rem;margin:12px 0 4px">語の図鑑(役割ごと)</h3>`;
   SLOTN.forEach((n,i)=>{
@@ -1079,7 +1086,7 @@ function render(){
   $("#status").innerHTML=`<span>手牌 ${n}枚</span><span>山 ${deck.length}枚</span><span>ツモ ${draws} / ${LMAX}回</span>`;
   $("#msg").textContent=msg;$("#stagebar").innerHTML=stageBarHTML();
   const ac=$("#actions");
-  if(choice&&pendingWin){const pv=previewWin(pendingWin.g);ac.innerHTML=`<span class="hint">アガリです! いまの手: <b>${fmtPts(pv.points)}点</b>(${pv.yin}淫・つながり${STAGE_WORD[pv.size]}・条件${pv.ok?"達成":"未達"})。見送ると、1枚捨てて残りのツモで続けます。完成しなければノーテン扱い(0点)。</span><button class="b main" data-a="agaru">アガる</button><button class="b" data-a="miokuri">見送る(残り${STG.skips}回)</button>`;}
+  if(choice&&pendingWin){const pv=previewWin(pendingWin.g);ac.innerHTML=`<span class="hint">アガリです! いまの手: <b>${fmtPts(pv.points)}解読点</b>(${pv.yin}淫・つながり${STAGE_WORD[pv.size]}・条件${pv.ok?"達成":"未達"})。見送ると、1枚捨てて残りのツモで続けます。完成しなければノーテン扱い(0解読点)。</span><button class="b main" data-a="agaru">アガる</button><button class="b" data-a="miokuri">見送る(残り${STG.skips}回)</button>`;}
   else if(won||over){ac.innerHTML=over?`<span class="hint">もう一度、配牌してください。</span>`:"";}
   else{
     const labs=sel.map(id=>tileById(id)).filter(Boolean).map(t=>t.label);let h="";

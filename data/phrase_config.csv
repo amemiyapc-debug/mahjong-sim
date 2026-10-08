@@ -1,3 +1,4 @@
 key,value,note
 PHRASE_CAP_PER_HAND,1,1手(1回の和了)に表示・記録する句の最大数(20261008-2100)。0なら句なし
 PHRASE_POINTS,,句1つあたりの固定点。全句同じ(看板・型・型の種類を問わず差をつけない。20261008-2110)。未決のため空欄。点の計算にはまだ入れない(入れる場所: dan6/goro14.py の score() で points を出した後に、表示した句の数×PHRASE_POINTS を足す案)
+PHRASE_MULT,,句の倍率(研究♡1以降で効く。score_unlock.csv の phrase 行)。未決のため空欄=倍率なし。20261008-2250

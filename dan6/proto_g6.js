@@ -1,12 +1,18 @@
 /* dan6:goro */
-// ===== 語呂度・連鎖・テーマ・点(dan6/goro14.py の移植。点 = 500 × 句ボーナス × 連鎖倍率 × テーマ倍率) =====
+// ===== 語呂度・連鎖・テーマ・点(dan6/goro14.py の移植。解読点(内部名: points) = 500 × 句ボーナス × 連鎖倍率 × テーマ倍率。研究♡で解禁された項目だけが入る) =====
 const G6={BASE:{"0,1":1,"0,2":3,"0,3":1,"1,2":2,"1,3":2,"1,5":1,"1,6":1,"2,3":3,"2,4":2,"2,5":2,"2,6":1,"3,4":2,"3,5":3,"3,6":1,"4,5":2,"4,6":1,"5,6":3},
  SAME:{"高まり|絶頂・結末":2,"感情・状況|命令・誘い":1,"行為|キス・吸い":1},
  MODS:["見せ","デカ","エロ","ぬれ","媚び","舐め","コキ","穴","♡","×2"],ALIAS:{"まめ":"くり","おまめ":"くり","すじ":"くり"},
  COMP:[["くりでイく","くり","絶頂"],["まんでイく","部位:女性器","絶頂"],["ちんでイく","部位:男性器","絶頂"],["胸でイく","部位:胸","絶頂"],["お尻でイく","部位:後ろ","絶頂"],["口でイく","部位:口","絶頂"],["ラブキス","キス","ラブ"],["調教","SM","態度"],["命令調教","SM","命令"],["濡れ濡れ","ぬれ","水音"],["見せつけ","見せ","絶頂"]],
  CL:{1:1,2:1,3:2,4:4,5:8},FLOOR:500};
-const LVN=["無知","恥ずかしい","すけべ"],KEN=[4,3,2],SKIPN=[1,2,3];   // 研究♡0/1/2: 語呂のしきい値(仮)・見送り回数(仮)
-const lvOf=stage=>stage<=2?0:stage<=5?1:2;
+const LVN=["無知","恥ずかしい","すけべ"],KEN=[4,3,2],SKIPN=[1,2,3];   // 研究♡0/1/2: 旧方式の語呂のしきい値 KEN(削除しない)・見送り回数(仮)
+const KEN_MODE="const",KEN_CONST=3;                                       // data/score_config.csv。const=研究♡によらず一定(暫定3)、table=旧KEN
+const thOf=lv=>KEN_MODE==="table"?KEN[lv]:KEN_CONST;
+const UNLOCK={base:[1,1,1],en:[0,1,1],yaku:[0,1,1],phrase:[0,1,1],chain:[0,0,1],theme:[0,0,1]};   // data/score_unlock.csv(研究♡0/1/2)
+const LAP_KEN=[[1,0],[2,1],[3,2]];                                         // data/lap_config.csv: 周回数 -> 研究♡(3周目以降=2)
+function kenLap(lap){let k=LAP_KEN[0][1];for(const [l,v] of LAP_KEN)if(lap>=l)k=v;return k;}
+let LAP=1;try{const q=+new URLSearchParams(location.search).get("lap");if(q>=1)LAP=Math.floor(q);}catch(e){}   // 周回数。?lap=2 で指定
+const lvOf=_stage=>kenLap(LAP);   // 研究♡は周回数で決まる。ステージ番号では変わらない(20261008-2250)
 const G6ROW=new Map();
 function g6mk(name,r){
   const kind=r[7],slotNo=r[0],sub=r[2],part=r[4],tone=r[5];
@@ -80,11 +86,11 @@ function g6theme(nodes){
 }
 // words: 語名4つ、head: 雀頭名、lv: 研究♡(0/1/2)、yin: 名前つき役の淫の合計(裏読みを含む)
 function g6score(words,head,lv,yin){
-  const th=KEN[lv],nodes=words.map(g6word).concat([g6head(head)]),L=[];
+  const th=thOf(lv),u=k=>UNLOCK[k][lv],nodes=words.map(g6word).concat([g6head(head)]),L=[];
   for(let i=0;i<5;i++)for(let j=i+1;j<5;j++){const s=g6link2(nodes[i],nodes[j],th);if(s)L.push([nodes[i].word,nodes[j].word,s]);}
   const C=g6collapse(nodes,L),ch=g6chain(nodes,C),mult=g6mult(ch.m),th2=g6theme(nodes);
-  const link=C.reduce((s,x)=>s+Math.min(3,x[2]-2),0),bonus=1+link+yin;
-  return {links:C.length,rawLinks:L.length,chainN:ch.m,chain:mult,bonus,linkBonus:link,yin,theme:th2.mult,themeName:th2.name,themeK:th2.k,composite:th2.comp,size:ch.size,pairs:C,points:G6.FLOOR*bonus*mult*th2.mult};
+  const linkFull=C.reduce((s,x)=>s+Math.min(3,x[2]-2),0),link=linkFull*u('en'),yinA=yin*u('yaku'),bonus=1+link+yinA,chA=u('chain')?mult:1,tmA=u('theme')?th2.mult:1;
+  return {lv,linkFull,chainFull:mult,themeFull:th2.mult,yinApplied:yinA,links:C.length,rawLinks:L.length,chainN:ch.m,chain:chA,bonus,linkBonus:link,yin,theme:tmA,themeName:th2.name,themeK:th2.k,composite:th2.comp,size:ch.size,pairs:C,points:u('base')?G6.FLOOR*bonus*chA*tmA:0};
 }
 const STAGE_WORD=["","語","句","節","文","碑文"];
 const CONDN={1:"句を作る(2語がつながる)",2:"節を作る(3語がつながる)",3:"節で、テーマ語3つ",4:"文を作る(4語がつながる)",5:"複合テーマ成立(2タグの語3つ以上)",6:"文で、テーマ語4つ",7:"碑文を作る(5語全部つながる)",8:"碑文で、テーマ語5つ"};

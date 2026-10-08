@@ -1,0 +1,3 @@
+key,value,note
+KEN_MODE,const,const=研究♡に関係なく語を結ぶしきい値は一定(KEN_CONST)。table=旧方式(dan6/goro14.py の KEN: 研究♡0/1/2=4/3/2)
+KEN_CONST,3,KEN_MODE=const のしきい値(暫定。初期値の3)
