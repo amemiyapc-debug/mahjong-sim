@@ -18,7 +18,7 @@ function checkWin(){
   const info=parts.map(p=>{const ws=p.melds.map(m=>WI.get(m.word.name)),hd=HI.get(p.head.name),sc=scoreHand(ws,hd,oho,true);
     const gs=g6score(ws.map(w=>DICT.words[w].name),DICT.heads[hd].name,lv,sc.yin);
     return {p,pts:gs.points,yin:sc.yin,mk:p.melds.map(m=>key(m.word.name,m.assigned)),hk:key(p.head.name,p.headAssigned)};});
-  // 自分で組んだ面子・雀頭を、できるだけ多く残したまま、アガリ形にする。残りの牌は、点が最大になる分け方で自動で組む。だめなら、組み替える
+  // 自分で組んだ面子・雀頭を、できるだけ多く残したまま、アガリ形にする。残りの牌は、解読点が最大になる分け方で自動で組む。だめなら、組み替える
   const subsets=[];for(let m=0;m<(1<<melds.length);m++)subsets.push(melds.filter((_,i)=>m&(1<<i)));
   subsets.sort((x,y)=>y.length-x.length);
   let hit=null;
@@ -51,7 +51,7 @@ function checkWin(){
 
 ITEMS = '''function itemsHTML(sc){
   const ys=sc.items.filter(x=>x.merge||!KZ.has(x.name)),zs=sc.items.filter(x=>!x.merge&&KZ.has(x.name));
-  let s=ys.length?ys.map(x=>`<div class="sc">${x.merge?"合体 ":""}${x.name} <span class="han">+${x.han}淫</span>${x.merge?` <small>(${x.merge.join("+")}の合体)</small>`:""}</div>`).join(""):`<div class="sc">点に効く名前つき役はありません</div>`;
+  let s=ys.length?ys.map(x=>`<div class="sc">${x.merge?"合体 ":""}${x.name} <span class="han">+${x.han}淫</span>${x.merge?` <small>(${x.merge.join("+")}の合体)</small>`:""}</div>`).join(""):`<div class="sc">解読点に効く名前つき役はありません</div>`;
   if(zs.length)s+=`<div class="tags">${zs.map(x=>`<span class="ktag">${x.name}</span>`).join("")}</div>`;
   return s;
 }
@@ -109,10 +109,10 @@ def apply(s):
     region("function itemsHTML(sc){", "function winHTML(){", ITEMS)
     sub1("ura,total,gs,lv:lvNow,", "ura,total,gs,lv:lvNow,firstIn:explainIn(total),")
     sub1("  s+=`<div style=\"margin-top:6px\">${itemsHTML(d.own.sc)}</div>`;",
-         "  s+=`<div style=\"margin-top:6px\">${itemsHTML(d.own.sc)}</div>`;\n  if(d.firstIn)s+=`<div class=\"hint\" style=\"margin-top:4px\"><b>淫</b>とは: 名前つき役の数字です。句ボーナスに足されて、点が増えます(例: +3淫なら、句ボーナスが +3)。</div>`;")
+         "  s+=`<div style=\"margin-top:6px\">${itemsHTML(d.own.sc)}</div>`;\n  if(d.firstIn)s+=`<div class=\"hint\" style=\"margin-top:4px\"><b>淫</b>とは: 名前つき役の数字です。句ボーナスに足されて、解読点が増えます(例: +3淫なら、句ボーナスが +3)。</div>`;")
     sub1("  if(won.kept<won.total)s+=`<div class=\"hint\" style=\"margin-top:6px\">手で組んだ形のうち ${won.kept}/${won.total} をそのまま使い、残りは自動で組みました。</div>`;",
          "  if(won.user>won.kept)s+=`<div class=\"hint rearr\" style=\"margin-top:6px\"><b>組み替えました</b>。自分で組んだ ${won.user} 個のうち ${won.kept} 個はそのまま使い、残りは、アガリになる形に組み替えました。</div>`;\n"
-         "  else if(won.kept<5)s+=`<div class=\"hint\" style=\"margin-top:6px\">自分で組んだ ${won.kept} 個はそのまま。残りの牌は、点が最大になる分け方で自動で組みました。</div>`;")
+         "  else if(won.kept<5)s+=`<div class=\"hint\" style=\"margin-top:6px\">自分で組んだ ${won.kept} 個はそのまま。残りの牌は、解読点が最大になる分け方で自動で組みました。</div>`;")
     sub1("#shflash{position:fixed", CSS + "#shflash{position:fixed")
     region('<div id="show" hidden>', "<script>", SHOWHTML)
     region("async function playShow(){", '$$("sh-skip").onclick=', SHOWJS + "\n")

@@ -103,6 +103,10 @@ sub1("ura,total,near,", "ura,total,hi:hiR,near,")
 sub1("<h2>アガリ! ${d.total}翻 / ${pts(d.total)}点</h2>", "<h2>アガリ! ${d.total}翻 / ${fmtPts(pts(d.total))}点</h2><div class=\"hint\">ハイスコア ${fmtPts(d.hi.hi)}点${d.hi.isNew?\" ★更新!\":\"\"}</div>")
 sub1("pts(T).toLocaleString()+'点", "fmtPts(pts(T))+'点")
 sub1("${e.pts.toLocaleString()}点", "${fmtPts(e.pts)}点")
+# 点 -> 解読点(20261008-2250。画面の表示。内部の変数名は points のまま)
+for _a, _b in (("${fmtPts(pts(d.total))}点</h2>", "${fmtPts(pts(d.total))}解読点</h2>"), ("ハイスコア ${fmtPts(d.hi.hi)}点", "ハイスコア ${fmtPts(d.hi.hi)}解読点"),
+               ("fmtPts(pts(T))+'点", "fmtPts(pts(T))+'解読点"), ("${fmtPts(e.pts)}点", "${fmtPts(e.pts)}解読点")):
+    s = s.replace(_a, _b)
 sub1(".wcard{position:relative}.wcard .nw{position:absolute;top:-9px;right:-6px;background:#ff2d7a;color:#fff;font-size:.6rem;border-radius:6px;padding:0 4px}", ".wcard{position:relative}")
 # 8. 役エンジンの追加分(yaku14.py と同じ条件。slot: 選択子、語幹・修飾牌を変数にした1本化、種類(×2)、雀頭の系統の集合)
 sub1('tag:a[6]||"",slot:a[7]}));', 'tag:a[6]||"",slot:a[7],type:a[0]}));')
