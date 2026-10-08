@@ -77,3 +77,47 @@ class PhraseBook:
         """その組の分類: 看板に当てはまれば「看板」、型に当てはまれば型のID(重なれば、すべて)"""
         out = (["看板"] if pair in self.signboard else []) + [tid for tid in type_ids if pair in self.type_pairs[tid]]
         return out
+
+
+# ---------------- 1手に表示・記録する句の選び方(20261008-2100) ----------------
+def load_config():
+    """data/phrase_config.csv → {キー: 値}。PHRASE_CAP_PER_HAND は整数、PHRASE_POINTS は未決なら None"""
+    c = {r["key"]: r["value"] for r in rd("phrase_config.csv")}
+    return dict(PHRASE_CAP_PER_HAND=int(c["PHRASE_CAP_PER_HAND"]), PHRASE_POINTS=(float(c["PHRASE_POINTS"]) if c.get("PHRASE_POINTS") else None))
+
+
+def load_type_frequency():
+    """data/phrase_type_frequency.csv → {type_id: 出現回数}(少ない型を優先するための値)"""
+    return {r["type_id"]: int(r["count"]) for r in rd("phrase_type_frequency.csv")}
+
+
+def select_phrases(candidates, book, type_ids, rng, cap=None, freq=None):
+    """1手で成立した句(順序なしの2語の集合の集合)から、表示・記録する句を最大 cap 個、選ぶ。
+    a. 看板の句があれば、看板を選ぶ(複数あればランダム)。
+    b. 看板がなければ、成立した型のうち、出現回数(freq)が少ない型を優先(同数ならランダム)。
+    c. 型が決まったら、その型の組から、ランダムに1つ。
+    cap 個まで、1つずつ、残りから同じ手順で選ぶ(cap=1 が既定の運用)。乱数は rng(seed で再現)。選んだ順のリストを返す。"""
+    cap = load_config()["PHRASE_CAP_PER_HAND"] if cap is None else cap
+    freq = load_type_frequency() if freq is None else freq
+    rest = set(candidates); out = []
+    for _ in range(cap):
+        if not rest: break
+        sb = sorted((p for p in rest if p in book.signboard), key=lambda p: sorted(p))
+        if sb:
+            pick = rng.choice(sb)
+        else:
+            by_type = {}
+            for p in sorted(rest, key=lambda p: sorted(p)):
+                for tid in type_ids:
+                    if p in book.type_pairs[tid]: by_type.setdefault(tid, []).append(p)
+            least = min(freq[t] for t in by_type)
+            tid = rng.choice(sorted(t for t in by_type if freq[t] == least))
+            pick = rng.choice(by_type[tid])
+        out.append(pick); rest.discard(pick)
+    return out
+
+
+def classify(pair, book, type_ids):
+    """表示した句の分類: 看板(看板に当てはまれば)、なければ型のID"""
+    if pair in book.signboard: return "看板"
+    return next(t for t in type_ids if pair in book.type_pairs[t])

@@ -274,6 +274,7 @@ def score(words, head, P=None, yin=0):
     tm, tn, k = best_theme(nodes)
     size = max([c[0] for c in comp.values()] + [1])            # つながった語の数の最大(語1・句2・節3・文4・碑文5)
     kk, compo = theme_counts(nodes)
+    # 句(語A+語B。看板・型)の得点(PHRASE_POINTS。data/phrase_config.csv)は、ここ(points を出したあと)に、表示した句の数×PHRASE_POINTS を足す案。未決のため、まだ入れない(20261008-2110)
     return dict(links=len(C), raw_links=len(L), merges=m, chain=ch, bonus=bonus, yin=yin, theme=tm, theme_name=tn, theme_k=kk,
                 composite=compo, size=size, stage_name=STAGE_NAMES[size],
                 points=FLOOR * bonus * ch * tm, pairs=C)
