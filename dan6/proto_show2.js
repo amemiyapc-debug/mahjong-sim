@@ -13,7 +13,9 @@ function fitType(n,W,H){   // n文字を W×H に収める文字サイズと1行
   for(let r=1;r<=10;r++){const c=Math.ceil(n/r),fs=Math.floor(Math.min(46,W/c));if(fs*1.25*r<=H&&fs>best.fs)best={fs,c};}
   return best;
 }
-function stageLabel(id,txt){const el=$$("sh-stage");el.textContent=txt;$$("show").dataset.stage=id;window._stageLog.push({id,t:Math.round(performance.now()-showT0)});}
+window._panes={};
+function stageLabel(id,txt){const prev=$$("show").dataset.stage;if(prev&&prev!==id)window._panes[prev]=$$("sh-pane").innerText;   // 段階を離れるときの画面の文字(試験用の記録)
+  const el=$$("sh-stage");el.textContent=txt;$$("show").dataset.stage=id;window._stageLog.push({id,t:Math.round(performance.now()-showT0)});}
 function setPane(html){const p=$$("sh-pane");p.innerHTML=html;p.classList.remove("in");void p.offsetWidth;p.classList.add("in");return p;}
 const SLOTCOL=["#E6E1EA","#FFB8D4","#FFD3C2","#F0A0DC","#BFD4FF","#CDB0F5","#FFF0A6"];
 function wordsRow(d){return '<div class="sh-words">'+d.own.ws.map((w,i)=>'<span class="sw" style="background:'+SLOTCOL[WA[w].slot]+'">'+String(d.own.melds[i]).split("・")[0]+'</span>').join("")+'<span class="sw hd">'+d.own.head+'</span></div>';}
@@ -40,7 +42,7 @@ const LNAME={1:"並",2:"良",3:"絶妙"};
 function linkSnd2(k){const f=[523.25,659.25,880][k-1];tone(f,.22,"triangle",.1+.03*k,0,f*1.5);if(k>=2)tone(f*1.5,.3,"sine",.05*k,.05);if(k>=3){tone(f*2,.4,"sine",.06,.1);nzs(.2,.08,.1,6000,"highpass");}}
 async function playShow(){
   if(!SHOW||!won||!won.data||showRunning)return;
-  const d=won.data,g=d.gs,lv=d.lv;showRunning=true;skipShow=false;showFF=false;showJump=false;ensureAudio();const tok=++showTok;showT0=performance.now();window._typeLog=[];window._stageLog=[];
+  const d=won.data,g=d.gs,lv=d.lv;showRunning=true;skipShow=false;showFF=false;showJump=false;ensureAudio();const tok=++showTok;showT0=performance.now();window._typeLog=[];window._stageLog=[];window._panes={};$$("show").dataset.stage="";
   const sl=ms=>new Promise((res,rej)=>{const go=()=>tok!==showTok?rej(CANCEL):showJump?rej(JUMP):res();(skipShow||showJump)?go():setTimeout(go,showFF?ms/4:ms);});
   slShow=sl;
   const stages=planStages(d),typeN=Array.from(d.sentence).length;

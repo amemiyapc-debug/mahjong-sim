@@ -27,6 +27,7 @@ with sync_playwright() as p:
     hand = pg.evaluate(FIND)
     ok("演出テスト用の手が見つかった(縁・淫2以上・連鎖・テーマが全部効く)", hand is not None, str(hand)[:160])
     labels = hand["labels"]
+    has_phrase = False
     def run(lap, tag, watch=True, skip_at=None):
         pg.evaluate(SETUP, [[labels[-1]], labels[:-1], lap])
         pg.evaluate("()=>draw()"); pg.wait_for_timeout(150)
@@ -46,10 +47,13 @@ with sync_playwright() as p:
                     pg.screenshot(path=os.path.join(SHOTS, f"show_{tag}_{seq.index(st)+1}_{st}.png")); del shot_at[st]
             if last == "result" and pg.evaluate("()=>!showRunning"): break
             pg.wait_for_timeout(100)
+        shots.update(pg.evaluate("()=>window._panes"))   # 各段階を離れるときの画面の文字(演出のコードが記録)
+        shots["result"] = pg.evaluate("()=>document.getElementById('sh-pane').innerText")
         return seq, shots
     # ---- 1周目(研究♡0) ----
+    has_phrase = pg.evaluate("(L)=>selectPhrases(allPartitions(DICT,L,500),1).length>0", labels)   # 句が成立する手なら、段階4(句バナー)が入る
     seq, panes = run(1, "lap1")
-    ok("1周目: 段階が 宣言 → タイトル → 縮む → 解読点+500 → リザルト の順(淫・縁・倍率の段階は出ない)", seq == ["declare", "title", "shrink", "base", "result"], str(seq))
+    ok("1周目: 段階が 宣言 → タイトル → 縮む → 解読点+500 → リザルト の順(淫・縁・倍率の段階は出ない)", seq == ["declare", "title", "shrink"] + (["phrase"] if has_phrase else []) + ["base", "result"], str(seq))
     ok("1周目: 『解読点 +500』と、モザイクの本当の解読点(例: 3█,███)が出る", "+500" in panes["base"] and re.search(r"\d█", panes["base"]) is not None, repr(panes["base"]))
     d = pg.evaluate("()=>({real:won.data.gsReal.points, pts:won.data.gs.points, lv:won.data.lv})")
     first = str(int(round(d["real"])))[0]
@@ -61,7 +65,7 @@ with sync_playwright() as p:
     ok("1周目: 最終の解読点が表示される(+500)", "+500" in panes["result"] or "500" in panes["result"], repr(panes["result"][:80]))
     # ---- 研究♡2(3周目) ----
     seq, panes = run(3, "lap3")
-    ok("研究♡2: 段階が 宣言 → タイトル → 縮む → 淫 → 縁 → 倍率とリール → リザルト", seq == ["declare", "title", "shrink", "yin", "en", "reel", "result"], str(seq))
+    ok("研究♡2: 段階が 宣言 → タイトル → 縮む → 淫 → 縁 → 倍率とリール → リザルト", seq == ["declare", "title", "shrink"] + (["phrase"] if has_phrase else []) + ["yin", "en", "reel", "result"], str(seq))
     ok("淫の画面には淫だけ(縁・倍率・解読点の数字は出ない)", "淫" in panes["yin"] and "縁" not in panes["yin"] and "×" not in panes["yin"] and "解読点" not in panes["yin"], repr(panes["yin"][:100]))
     ok("縁の画面には縁の数字だけ(淫・倍率・解読点は出ない)", "縁 +" in panes["en"] and "淫" not in panes["en"] and "×" not in panes["en"] and "解読点" not in panes["en"], repr(panes["en"][:100]))
     ok("倍率の画面は、縁・連鎖・テーマの倍率とリールだけ(淫の一覧は出ない)", "×" in panes["reel"] and "連鎖" in panes["reel"] and "テーマ" in panes["reel"] and "淫" not in panes["reel"], repr(panes["reel"][:100]))
@@ -78,7 +82,7 @@ with sync_playwright() as p:
     ok("スキップ(1周目): 解読点 +500 とモザイクの値が出る。連鎖・テーマの内訳は出ない", "+500" in g["txt"] and "█" in g["txt"] and "連鎖" not in g["txt"] and "テーマ" not in g["txt"], repr(g["txt"][:100]))
     # ---- 研究♡1(2周目): 倍率の段階は縁(1+縁+淫)だけ ----
     seq, panes = run(2, "lap2")
-    ok("研究♡1: 淫・縁・倍率(縁の倍率だけ。連鎖・テーマは出ない)の段階が出る", seq == ["declare", "title", "shrink", "yin", "en", "reel", "result"] and "連鎖" not in panes["reel"] and "テーマ" not in panes["reel"], str(seq) + repr(panes["reel"][:60]))
+    ok("研究♡1: 淫・縁・倍率(縁の倍率だけ。連鎖・テーマは出ない)の段階が出る", seq == ["declare", "title", "shrink"] + (["phrase"] if has_phrase else []) + ["yin", "en", "reel", "result"] and "連鎖" not in panes["reel"] and "テーマ" not in panes["reel"], str(seq) + repr(panes["reel"][:60]))
     ok("ページエラーがない", not errs, str(errs[:1]))
     b.close()
 print("すべてOK" if all(res) else "失敗"); sys.exit(0 if all(res) else 1)

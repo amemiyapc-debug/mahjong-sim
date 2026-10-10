@@ -145,6 +145,8 @@ import proto_patch5
 s = proto_patch5.apply(s)
 import proto_patch6
 s = proto_patch6.apply(s)
+import proto_patch7
+s = proto_patch7.apply(s)
 # ---- 一周版100語(20261010-1925 作業2): 語 data/words_ichishuu100.csv・山156枚・雀頭27。365語版は prototype/hiragana_tap_prototype_365.html に残す(従来の試験はこちら) ----
 open(os.path.join(ROOT, "prototype", "hiragana_tap_prototype_365.html"), "w", encoding="utf-8").write(s)
 sys.path.insert(0, os.path.join(ROOT, "ichishuu"))
@@ -156,6 +158,30 @@ _hn = {h["head"] for h in _v["heads"]}; _hi = [i for i, h in enumerate(H) if h["
 assert len(_wi) == 100 and len(_hi) == 27 and _v["wall"] == 156, (len(_wi), len(_hi), _v["wall"])
 data100 = dict(data, W=[data["W"][i] for i in _wi], A=[data["A"][i] for i in _wi], H=[data["H"][i] for i in _hi], HA=[data["HA"][i] for i in _hi],
                C=dict(sorted(_v["copies"].items(), key=lambda kv: kv[0])))
+import phrase_types as PT
+_book = PT.PhraseBook(); _freq = PT.load_type_frequency()
+_nm = [data["W"][i][0] for i in _wi]; _id = {n: k for k, n in enumerate(_nm)}
+_pn = {r["語A"] + "|" + r["語B"]: r for r in _csv("phrase_names.csv")}
+_sb = []
+for _r in _csv("phrase_pairs_draft.csv"):
+    _x = _pn.get(_r["word_a"] + "|" + _r["word_b"]) or _pn[_r["word_b"] + "|" + _r["word_a"]]
+    _sb.append([_id[_r["word_a"]], _id[_r["word_b"]], _x["名前"].strip(), _x["1周目の誤読名"].strip()])
+_ty = {}
+for _t in _book.types:
+    _fa, _fb = PT.parse_filter(_t["a_filter"]), PT.parse_filter(_t["b_filter"]); _rl = _book._rules_for(_t["type_id"]); _seen = set(); _lst = []
+    for _a in _book.words:
+        if not PT.match(_a, _fa): continue
+        for _b in _book.words:
+            if _a is _b or not PT.match(_b, _fb) or not _book._ok(_rl, _a, _b): continue
+            _k = frozenset((_a["word"], _b["word"]))
+            if _k in _seen: continue
+            _seen.add(_k); _lst.append([_id[_a["word"]], _id[_b["word"]]])
+    assert _seen == _book.type_pairs[_t["type_id"]]
+    _ty[_t["type_id"]] = _lst
+_lines = {r["key"]: r["text"] for r in _csv("lina_lines.csv")}
+_tl = {r["type_id"]: r["lap1_template"] for r in _csv("phrase_type_lines.csv")}
+data100["CFG"] = dict(data["CFG"], PH=dict(names=_nm, SB=_sb, TY=_ty, TYD={t["type_id"]: dict(name=t["name"], desc=re.sub(r"\(2040[^)]*\)", "", t["description"]), lap1=_tl[t["type_id"]]) for t in _book.types},
+                      FREQ={k: v for k, v in _freq.items()}, LINES=_lines))
 i = s.index("const DATA=") + len("const DATA="); _, end = json.JSONDecoder().raw_decode(s[i:])
 s = s[:i] + json.dumps(data100, ensure_ascii=False) + s[i + end:]
 _old = 'if(i===undefined)throw new Error("辞書にない語: "+tok);a[i]=1;'
