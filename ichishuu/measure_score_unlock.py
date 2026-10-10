@@ -16,10 +16,9 @@ def U(**ov):
     for k, v in ov.items(): u[k] = dict(zip((0, 1, 2), v))
     return u
 VARIANTS = {   # 名前: (研究♡, 解禁表, しきい値方式 or None=全項目・旧)
-    "lv0": (0, BASE_U, "const"), "lv1": (1, BASE_U, "const"), "lv2": (2, BASE_U, "const"),
-    "lv1_a_縁だけ": (1, U(yaku=(0, 0, 1), phrase=(0, 0, 1)), "const"),
-    "lv2_a_縁だけ": (2, U(yaku=(0, 0, 1), phrase=(0, 0, 1)), "const"),
-    "KEN_lv0": (0, BASE_U, "table"), "KEN_lv1": (1, BASE_U, "table"), "KEN_lv2": (2, BASE_U, "table"),
+    "lv0": (0, BASE_U, None), "lv1": (1, BASE_U, None), "lv2": (2, BASE_U, None),     # 設定(data/score_config.csv)のとおり。20261010-1210 から KEN_MODE=table(研究♡1=3・研究♡2=2)
+    "lv1_a_縁だけ": (1, U(yaku=(0, 0, 1), phrase=(0, 0, 1)), None),
+    "const3_lv0": (0, BASE_U, "const"), "const3_lv1": (1, BASE_U, "const"), "const3_lv2": (2, BASE_U, "const"),   # 20261008-2250 の暫定(しきい値一定の3)
     "旧(KEN・全項目)_lv0": (0, None, "table"), "旧(KEN・全項目)_lv1": (1, None, "table"), "旧(KEN・全項目)_lv2": (2, None, "table"),
 }
 
@@ -52,6 +51,7 @@ def main():
         G.UNLOCK = BASE_U
         sc = max((G.score(nm, hd, G.params(2), yin) for nm, hd, yin in cand), key=lambda x: x["points"])
         extra["lv2_chain>1"] += sc["chain"] > 1; extra["lv2_theme>1"] += sc["theme"] > 1; extra["lv2_en>0"] += sc["en"] > 0; extra["yin>0"] += sc["yin"] > 0
+    json.dump([g1[i]["hand"] for i in win_idx], open(os.path.join(ROOT, "ichishuu", "win_hands_20261008.json"), "w", encoding="utf-8"), ensure_ascii=False)   # tests/test_score_measure.py が使う
     out = dict(games=GAMES, wins=len(win_idx), win_rate=100 * len(win_idx) / GAMES, digest=digest, same_games_as_before=(digest == "e4eadad994d27ee3"), dist={}, extra=extra)
     for name, x in pts.items():
         xs = sorted(x); n = len(xs)

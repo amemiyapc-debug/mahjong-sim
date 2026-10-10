@@ -67,7 +67,7 @@ with sync_playwright() as p:
     ok("研究♡の呼び名 0=無知 / 1=恥ずかしい / 2=すけべ、旧KEN 4/3/2(削除しない)、見送り 1/2/3回。研究♡は周回数で決まる(1周目=0・2周目=1・3周目以降=2)で、ステージ番号では変わらない",
        pg.evaluate("()=>[LVN,KEN,SKIPN,[1,2,3,4].map(kenLap),[1,2,3,5,6,9].map(lvOf)]") == [["無知", "恥ずかしい", "すけべ"], [4, 3, 2], [1, 2, 3], [0, 1, 2, 2], [0, 0, 0, 0, 0, 0]])
     sys.path.insert(0, os.path.join(ROOT, "dan6")); import goro14 as G6
-    ok("しきい値は一定の3(KEN_MODE=const)、解禁表は data/score_unlock.csv と同じ", pg.evaluate("()=>[KEN_MODE,[0,1,2].map(thOf),UNLOCK]") == ["const", [3, 3, 3], {k: [v[lv] for lv in (0, 1, 2)] for k, v in G6.UNLOCK.items()}])
+    ok("しきい値は KEN_MODE=table(研究♡0/1/2=4/3/2。設定 data/score_config.csv と同じ)、解禁表は data/score_unlock.csv と同じ", pg.evaluate("()=>[KEN_MODE,[0,1,2].map(thOf),UNLOCK]") == [G6.CONFIG["KEN_MODE"], [G6.thresh_of(l) for l in (0, 1, 2)], {k: [v[lv] for lv in (0, 1, 2)] for k, v in G6.UNLOCK.items()}])
     ok("周回を変えると、研究♡が変わる(setLap)。ステージ番号では変わらない", pg.evaluate("()=>{const r=[];for(const l of [1,2,3]){setLap(l);r.push(lvOf(STG.stage));STG.stage=7;r.push(lvOf(STG.stage));STG.stage=1;}setLap(1);return r;}") == [0, 0, 1, 1, 2, 2])
     ok("画面の点は「解読点」。「点」だけの表示が残っていない(試作の表示文)", "解読点" in html and not re.search(r"(?<!解読)点</(h2|div|span)>", "\n".join(l for l in html.split("\n") if not l.startswith("const DATA="))))
     # ---- Python(yaku14.py・goro14.py)と、試作HTMLの照合 ----
@@ -145,16 +145,23 @@ with sync_playwright() as p:
     ok("つながりのある手でも、アガリ形で選択が出る(見送り1回)", st["choice"] and st["skips"] == 1, str(st))
     pg.evaluate("()=>act('agaru')"); pg.wait_for_timeout(300)
     r = pg.evaluate("()=>({won:!!won, st:won&&won.data&&won.data.st, game:STG.game, stage:STG.stage, size:won&&won.data&&won.data.gs.size, pts:won&&won.data&&won.data.gs.points})")
-    clear = r["size"] is not None and r["size"] >= 2
-    ok("アガる: アガリ画面が出て、条件(句=2語以上つながる)の判定とステージの更新が一致する", r["won"] and r["pts"] >= 500 and (("クリア" in r["st"]) == clear) and (r["stage"] == (2 if clear else 1)), str(r))
+    ok("アガる(1周目): アガリ画面が出る。ステージ1の条件は和了1回以上なので、1回アガればクリアして、ステージ2になる。解読点は500固定", r["won"] and r["pts"] == 500 and "クリア" in r["st"] and r["stage"] == 2, str(r))
     # 見送れない: ツモ上限(残りツモ0)・練習配牌
     st = pg.evaluate("""()=>{ dealRandom(); items=%s.map(l=>({k:'tile',tile:mk(l)})); deck=['う']; draws=LMAX-0; won=null; over=false; choice=false; render(); draw(); return {choice,over,won:!!won}; }""" % str(base13).replace("'", '"'))
     ok("ツモ上限(残りのツモ0)では、そもそもツモできず流局(見送りは選べない)", st["over"] and not st["choice"], str(st))
     st = pg.evaluate("""()=>{ dealPractice(); items=%s.map(l=>({k:'tile',tile:mk(l)})); deck=['う']; draws=0; won=null; over=false; choice=false; render(); draw(); return {choice,won:!!won,practice}; }""" % str(base13).replace("'", '"'))
     ok("練習配牌では見送りの選択は出ない(ステージ制の対象外)", st["won"] and not st["choice"] and st["practice"], str(st))
-    # 研究♡はステージでは上がらない(20261008-2250): ステージ2クリア→3でも、研究♡は変わらず、「上がった」の通知も出ない
-    r = pg.evaluate("""()=>{ dealRandom(); LAP=1; STG.stage=2; STG.game=1; STG.lives=3; newTry(); const gs={size:5,themeK:3,composite:[]}; const a=lvOf(STG.stage); commitWin(gs); return {stage:STG.stage,news:STG.news,a,b:lvOf(STG.stage),bar:stageBarHTML()}; }""")
-    ok("ステージをクリアしても、研究♡は上がらない(1周目は無知のまま)。通知も出ない", r["stage"] == 3 and r["a"] == 0 and r["b"] == 0 and not r["news"] and "無知" in r["bar"] and "1周目" in r["bar"], str(r)[:200])
+    # 1周目のステージ条件 = 和了の回数(ステージ1=1回以上 / 2=2回以上 / 3=2回以上)。画面に「和了 n/3」。研究♡はステージでは上がらない
+    r = pg.evaluate("""()=>{ dealRandom(); LAP=1; STG.stage=2; STG.game=1; STG.lives=3; newTry(); const gs={size:1,themeK:0,composite:[]}; const out=[]; const a=lvOf(STG.stage);
+      out.push([STG.wins, STG.stage, stageBarHTML()]); commitWin(gs); out.push([STG.wins, STG.stage, STG.game, stageBarHTML()]); commitWin(gs); out.push([STG.wins, STG.stage, STG.game, stageBarHTML()]);
+      return {out, a, b:lvOf(STG.stage), news:STG.news}; }""")
+    o = r["out"]
+    ok("1周目のステージ2(2回以上): 1回目の和了は「和了 1/3」でクリアしない(ゲーム消費)、2回目でクリアしてステージ3。ステージバーに「和了 n/3」", "和了 0/3" in o[0][2] and o[1][1] == 2 and o[1][0] == 1 and o[1][2] == 2 and "和了 1/3" in o[1][3] and o[2][1] == 3 and o[2][0] == 0 and "和了 0/3" in o[2][3], str(r)[:300])
+    ok("ステージをクリアしても、研究♡は上がらない(1周目は無知のまま)。通知も出ない", r["a"] == 0 and r["b"] == 0 and not r["news"] and "無知" in o[2][3] and "1周目" in o[2][3], str(r)[:200])
+    r = pg.evaluate("""()=>{ dealRandom(); LAP=1; STG.stage=1; newTry(); const gs={size:1,themeK:0,composite:[]}; commitWin(gs); const s1=STG.stage; STG.stage=3; newTry(); commitWin(gs); const s3a=STG.stage; commitWin(gs); return [s1, s3a, STG.stage, [1,2,3,4,5].map(winsNeeded)]; }""")
+    ok("ステージ1は1回で、ステージ3は2回でクリア。表にないステージは最後の値(設定 data/stage_wins_lap1.csv と同じ)", r == [2, 3, 4, [G6.wins_needed(x) for x in (1, 2, 3, 4, 5)]] and r[3] == [1, 2, 2, 2, 2], str(r))
+    r = pg.evaluate("""()=>{ dealRandom(); LAP=1; STG.stage=2; STG.lives=3; newTry(); const gs={size:1,themeK:0,composite:[]}; let m=''; for(let i=0;i<3;i++){ if(i===0)commitWin(gs); else {m=consumeGame();} } return {lives:STG.lives, stage:STG.stage, game:STG.game, wins:STG.wins}; }""")
+    ok("3ゲーム使って和了が足りないと、ライフ-1で同じステージをやり直す(和了の数は0に戻る)", r["lives"] == 2 and r["stage"] == 2 and r["game"] == 1 and r["wins"] == 0, str(r))
     pg.evaluate("()=>{LAP=3;}")   # 以降の照合は、すべて解禁した研究♡2(3周目)で行う(1周目は500点で固定のため、点の大小を比べられない)
     # ===== 20261007-1345・1350 =====
     import time as _t

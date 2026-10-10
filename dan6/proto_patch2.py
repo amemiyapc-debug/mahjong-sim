@@ -45,11 +45,14 @@ def apply(s):
         s = s[:i0] + new + s[i1:]
     # --- 状態 ---
     sub1("let DEFER=true,deck=[]", "let choice=false,skipMode=false,pendingWin=null,skipCount=0,practice=true;   // 見送りの選択中・見送ったあとの捨て牌選び・見送ったか・練習配牌\n"
-         "const STG={stage:1,game:1,lives:3,skips:SKIPN[0],streak:0,news:\"\",msg:\"\"};   // ステージ制(3ゲーム/ステージ・ライフ3)\n"
+         "const STG={stage:1,game:1,wins:0,lives:3,skips:SKIPN[0],streak:0,news:\"\",msg:\"\"};   // ステージ制(3ゲーム/ステージ・ライフ3)\n"
          "function setLap(v){LAP=+v;newTry();STG.msg=\"周回を\"+LAP+\"周目にした(研究♡「\"+LVN[lvOf(0)]+\"」)\";try{render();}catch(e){}}\n"
-         "function newTry(){STG.game=1;STG.skips=SKIPN[lvOf(STG.stage)];}\n"
+         "function newTry(){STG.game=1;STG.wins=0;STG.skips=SKIPN[lvOf(STG.stage)];}\n"
          "function consumeGame(){STG.game++;if(STG.game>3){STG.lives--;if(STG.lives<=0){const st=STG.stage;STG.stage=1;STG.lives=3;newTry();return \" → ライフ0。ゲームオーバー(ステージ\"+st+\"まで)。ステージ1から\";}newTry();return \" → 3ゲーム使い切り。ライフ-1(残り\"+STG.lives+\")。ステージ\"+STG.stage+\"をやり直し\";}return \"(ゲーム \"+(STG.game-1)+\"/3 を消費)\";}\n"
-         "function commitWin(gs){const c=Math.min(STG.stage,8),lv=lvOf(STG.stage),ok=g6sat(gs,c);STG.streak=0;let m=\"条件「\"+CONDN[c]+\"」を\"+(ok?\"達成!\":\"満たせなかった\");\n"
+         "function commitWin(gs){const c=Math.min(STG.stage,8),lv=lvOf(STG.stage);STG.streak=0;\n"
+         "  if(lv===0){STG.wins++;const need=winsNeeded(STG.stage);let m=\"和了 \"+STG.wins+\"/3(このステージは\"+need+\"回以上でクリア)\";   // 1周目: 条件は和了の回数(data/stage_wins_lap1.csv)\n"
+         "    if(STG.wins>=need){const done=STG.stage;STG.stage++;m+=\" → ステージ\"+done+\"クリア!\";newTry();}else m+=consumeGame();STG.msg=m;return m;}\n"
+         "  const ok=g6sat(gs,c);let m=\"条件「\"+CONDN[c]+\"」を\"+(ok?\"達成!\":\"満たせなかった\");\n"
          "  if(ok){const done=STG.stage;STG.stage++;const nl=lvOf(STG.stage);m+=\" → ステージ\"+done+\"クリア!\";newTry();if(nl>lv){STG.news=\"研究♡が「\"+LVN[nl]+\"」に上がった! 新しい語呂が見えるようになった\";try{toast(STG.news);}catch(e){}}}\n"
          "  else m+=consumeGame();STG.msg=m;return m;}\n"
          "function isTenpai13(){const labs=flat().map(t=>t.label);for(const l of new Set(deck))if(allPartitions(DICT,labs.concat([l]),1).length)return true;return false;}\n"
@@ -57,7 +60,7 @@ def apply(s):
          "  else if(isTenpai13()){STG.streak++;m=\"テンパイ流局(ゲームは消費しない)\"+(STG.streak>=3?\" ・焦らしプレイ \"+STG.streak+\"連続!\":\" ・連続テンパイ \"+STG.streak);}\n"
          "  else{STG.streak=0;m=\"ノーテン(1ゲーム消費)\"+consumeGame();}STG.msg=m;}\n"
          "function stageBarHTML(){if(practice)return '<span class=\"hint\">練習配牌(ステージ制の対象外)。「ランダム配牌」でステージ制が始まります。</span>';const lv=lvOf(STG.stage),c=Math.min(STG.stage,8);\n"
-         "  return '<b>ステージ'+STG.stage+'</b> ・<select id=\"lapsel\" onchange=\"setLap(this.value)\" style=\"font-size:.8rem\">'+[1,2,3,4].map(n=>'<option value=\"'+n+'\"'+(n===LAP?' selected':'')+'>'+n+'周目</option>').join('')+'</select> ・研究♡「'+LVN[lv]+'」 ・ゲーム '+STG.game+'/3 ・ライフ '+'♥'.repeat(STG.lives)+' ・見送り 残'+STG.skips+'回<br>条件: '+CONDN[c]+(STG.news?'<br><b class=\"news\">'+STG.news+'</b>':'')+(STG.msg?'<br><small>前のゲーム: '+STG.msg+'</small>':'');}\n"
+         "  return '<b>ステージ'+STG.stage+'</b> ・<select id=\"lapsel\" onchange=\"setLap(this.value)\" style=\"font-size:.8rem\">'+[1,2,3,4].map(n=>'<option value=\"'+n+'\"'+(n===LAP?' selected':'')+'>'+n+'周目</option>').join('')+'</select> ・研究♡「'+LVN[lv]+'」'+(lv===0?' ・<b class=\"winct\" style=\"font-size:1.05rem\">和了 '+STG.wins+'/3</b>(あと'+Math.max(0,winsNeeded(STG.stage)-STG.wins)+'回)':'')+' ・ゲーム '+STG.game+'/3 ・ライフ '+'♥'.repeat(STG.lives)+' ・見送り 残'+STG.skips+'回<br>条件: '+(lv===0?'3ゲームのうち '+winsNeeded(STG.stage)+'回以上 和了':CONDN[c])+(STG.news?'<br><b class=\"news\">'+STG.news+'</b>':'')+(STG.msg?'<br><small>前のゲーム: '+STG.msg+'</small>':'');}\n"
          "let DEFER=true,deck=[]")
     sub1('<div id="status"></div>', '<div id="status"></div>\n <div id="stagebar" class="hint" style="margin:4px 0"></div>')
     sub1(".hint{font-size:.76rem;color:var(--sub)}", ".hint{font-size:.76rem;color:var(--sub)}.news{color:#ff6ba0}")
@@ -86,7 +89,7 @@ def apply(s):
     sub1('  if(won||over){ac.innerHTML=over?', '  if(choice&&pendingWin){const pv=previewWin(pendingWin.g);ac.innerHTML=`<span class="hint">アガリです! いまの手: <b>${fmtPts(pv.points)}解読点</b>(${pv.yin}淫・つながり${STAGE_WORD[pv.size]}・条件${pv.ok?"達成":"未達"})。見送ると、1枚捨てて残りのツモで続けます。完成しなければノーテン扱い(0解読点)。</span><button class="b main" data-a="agaru">アガる</button><button class="b" data-a="miokuri">見送る(残り${STG.skips}回)</button>`;}\n'
          '  else if(won||over){ac.innerHTML=over?')
     sub1("function handKeys(){", "function previewWin(g){const ms=g.filter(x=>x.kind===\"meld\"),hg=g.find(x=>x.kind===\"head\");const ws=ms.map(x=>WI.get(x.name)),hd=HI.get(hg.name);const oho=g.flatMap(x=>x.tiles).filter(t=>t.label===\"ぉ゛\").length;\n"
-         "  const sc=scoreHand(ws,hd,oho,true),lv=lvOf(STG.stage),gs=g6score(ws.map(w=>DICT.words[w].name),DICT.heads[hd].name,lv,sc.yin);return {points:gs.points,yin:sc.yin,size:gs.size,ok:g6sat(gs,Math.min(STG.stage,8))};}\nfunction handKeys(){")
+         "  const sc=scoreHand(ws,hd,oho,true),lv=lvOf(STG.stage),gs=g6score(ws.map(w=>DICT.words[w].name),DICT.heads[hd].name,lv,sc.yin);return {points:gs.points,yin:sc.yin,size:gs.size,ok:lv===0?(STG.wins+1>=winsNeeded(STG.stage)):g6sat(gs,Math.min(STG.stage,8))};}\nfunction handKeys(){")
     # --- evalWin: 点・淫 ---
     sub1("if(!best||sc.total>best.sc.total)best={p,ws,hd,sc};", "if(!best||sc.yin>best.sc.yin||(sc.yin===best.sc.yin&&sc.total>best.sc.total))best={p,ws,hd,sc};")
     sub1("const ura=best?Math.max(0,best.sc.total-own.total):0;", "const ura=best?Math.max(0,best.sc.yin-own.yin):0;")

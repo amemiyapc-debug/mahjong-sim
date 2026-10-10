@@ -17,9 +17,9 @@ FLOOR = 500
 SLOT_NAMES = ['前置き', '感情・誘い', '部位', '行為', '音', '反応', '喘ぎ声']
 STAGE_NAMES = {1: '語', 2: '句', 3: '節', 4: '文', 5: '碑文'}
 LV_NAMES = ['無知', '恥ずかしい', 'すけべ']      # 研究♡の呼び名(内部の数値は 0/1/2)
-KEN = {0: 4, 1: 3, 2: 2}                       # 研究♡ -> 語呂のしきい値(旧方式。data/score_config.csv の KEN_MODE=table のときだけ使う。削除しない)
+KEN = {0: 4, 1: 3, 2: 2}                       # 研究♡ -> 語を結ぶしきい値(data/score_config.csv の KEN_MODE=table のとき使う。20261010-1210 で table に決定。研究♡0は点に影響しない)
 SKIPS = {0: 1, 1: 2, 2: 3}                     # 研究♡ -> 見送り回数(仮。1ステージの全ゲームで共有)
-DEFAULT_THRESH = 3                             # 語呂のしきい値の初期値(KEN_MODE=const の既定。暫定)
+DEFAULT_THRESH = 3                             # KEN_CONST が空のときの値(KEN_MODE=const で使う)
 
 
 def _read_csv(name):
@@ -39,10 +39,16 @@ def load_lap(path_name='lap_config.csv'):
 
 def load_score_config(path_name='score_config.csv'):
     c = {r['key']: r['value'].strip() for r in _read_csv(path_name)}
-    return dict(KEN_MODE=c.get('KEN_MODE', 'const') or 'const', KEN_CONST=int(c.get('KEN_CONST') or DEFAULT_THRESH))
+    return dict(KEN_MODE=c.get('KEN_MODE', 'table') or 'table', KEN_CONST=int(c.get('KEN_CONST') or DEFAULT_THRESH))
+
+
+def load_stage_wins(path_name='stage_wins_lap1.csv'):
+    """1周目(研究♡0)のステージ条件: ステージ番号 -> 3ゲームのうち必要な和了の回数(data/stage_wins_lap1.csv)"""
+    return sorted((int(r['stage']), int(r['wins_needed'])) for r in _read_csv(path_name))
 
 
 UNLOCK = load_unlock()
+STAGE_WINS = load_stage_wins()
 LAP_KEN = load_lap()
 CONFIG = load_score_config()
 
@@ -56,8 +62,17 @@ def ken_lap(lap):
     return lv
 
 
+def wins_needed(stage):
+    """1周目のステージ条件(和了の回数)。表にないステージは、最後の行の値"""
+    n = STAGE_WINS[0][1]
+    for st, w in STAGE_WINS:
+        if stage >= st:
+            n = w
+    return n
+
+
 def thresh_of(lv, mode=None):
-    """研究♡ -> 語を結ぶしきい値。KEN_MODE=const(既定): 一定(KEN_CONST、暫定3)。KEN_MODE=table: 旧方式 KEN[lv]"""
+    """研究♡ -> 語を結ぶしきい値。KEN_MODE=table(既定。20261010-1210): KEN[lv](研究♡1=3、研究♡2=2)。KEN_MODE=const: 一定(KEN_CONST)"""
     mode = mode or CONFIG['KEN_MODE']
     return KEN[lv] if mode == 'table' else CONFIG['KEN_CONST']
 
