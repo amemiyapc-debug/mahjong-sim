@@ -127,6 +127,8 @@ import proto_patch3
 s = proto_patch3.apply(s)
 import proto_patch4
 s = proto_patch4.apply(s)
+import proto_patch5
+s = proto_patch5.apply(s)
 # ---- 一周版100語(20261010-1925 作業2): 語 data/words_ichishuu100.csv・山156枚・雀頭27。365語版は prototype/hiragana_tap_prototype_365.html に残す(従来の試験はこちら) ----
 open(os.path.join(ROOT, "prototype", "hiragana_tap_prototype_365.html"), "w", encoding="utf-8").write(s)
 sys.path.insert(0, os.path.join(ROOT, "ichishuu"))
