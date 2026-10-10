@@ -149,6 +149,8 @@ import proto_patch7
 s = proto_patch7.apply(s)
 import proto_patch8
 s = proto_patch8.apply(s)
+import proto_patch9
+s = proto_patch9.apply(s)
 # ---- 一周版100語(20261010-1925 作業2): 語 data/words_ichishuu100.csv・山156枚・雀頭27。365語版は prototype/hiragana_tap_prototype_365.html に残す(従来の試験はこちら) ----
 open(os.path.join(ROOT, "prototype", "hiragana_tap_prototype_365.html"), "w", encoding="utf-8").write(s)
 sys.path.insert(0, os.path.join(ROOT, "ichishuu"))
@@ -183,7 +185,8 @@ for _t in _book.types:
 _lines = {r["key"]: r["text"] for r in _csv("lina_lines.csv")}
 _tl = {r["type_id"]: r["lap1_template"] for r in _csv("phrase_type_lines.csv")}
 data100["CFG"] = dict(data["CFG"], PH=dict(names=_nm, SB=_sb, TY=_ty, TYD={t["type_id"]: dict(name=t["name"], desc=re.sub(r"\(2040[^)]*\)", "", t["description"]), lap1=_tl[t["type_id"]]) for t in _book.types},
-                      FREQ={k: v for k, v in _freq.items()}, LINES=_lines))
+                      FREQ={k: v for k, v in _freq.items()}, LINES=_lines,
+                      MEMOS={r["word"]: dict(memo=r["1周目の研究メモ"], strike=r["取り消し線の部分"], fix=r["訂正後(赤字)"]) for r in _csv("lina_memos_100.csv")}))
 i = s.index("const DATA=") + len("const DATA="); _, end = json.JSONDecoder().raw_decode(s[i:])
 s = s[:i] + json.dumps(data100, ensure_ascii=False) + s[i + end:]
 _old = 'if(i===undefined)throw new Error("辞書にない語: "+tok);a[i]=1;'
