@@ -34,18 +34,18 @@ def sat(m, c):
 _g = None
 
 
-def _init(kind):
+def _init(kind, lap=1):
     global _g
     cp = tile_copies(D6, "new", 0.05, 13)
-    _g = (Game(D6, cp, 12, cpu=KINDS[kind]), kind)
+    _g = (Game(D6, cp, 12, cpu=KINDS[kind]), kind, lap)
 
 
 def challenge(seed):
-    Gm, kind = _g; S = Gm.S; rng = random.Random(seed)
+    Gm, kind, lap = _g; S = Gm.S; rng = random.Random(seed)
     stage, lives, tsumo, streak, ach = 1, 3, 0, 0, False
     attempts, games, seq3 = [], [], 0
     while lives > 0 and stage <= MAXS:
-        cond = min(stage, 8); lv = G.ken_stage(stage); P = {"thresh": G.KEN[lv]}
+        cond = min(stage, 8); lv = G.ken_lap(lap); P = G.params(lv)      # 研究♡は周回数で決まる(ステージ番号では変わらない。20261008-2250)
         ctx = {"skips": G.SKIPS[lv] if kind in ("aim", "seek") else 0}
         used, ok = 0, False
         while used < 3 and not ok:
@@ -84,8 +84,8 @@ def challenge(seed):
     return dict(reached=stage, attempts=attempts, tsumo=tsumo, games=games, seq3=seq3, ach=ach)
 
 
-def run_live(kind, n, seed, procs):
-    with Pool(procs, initializer=_init, initargs=(kind,)) as p:
+def run_live(kind, n, seed, procs, lap=1):
+    with Pool(procs, initializer=_init, initargs=(kind, lap)) as p:
         out = []
         for i, r in enumerate(p.imap(challenge, [seed + i for i in range(n)], chunksize=4)):
             out.append(r)
@@ -104,13 +104,13 @@ def run_pool(a):
         res = dict(games=[{k: v for k, v in g.items() if k != "hand"} for g in games], lv={})
         wins = [g for g in games if g["result"] == "win"]
         for lv in (0, 1, 2):
-            res["lv"][lv] = [G.best_hand(S, g["hand"], {"thresh": G.KEN[lv]}) for g in wins]
+            res["lv"][lv] = [G.best_hand(S, g["hand"], G.params(lv)) for g in wins]
         out[kind] = res
         print(f"  {kind}: {time.time()-t0:.0f}秒 アガリ {len(wins)}/{len(games)}", flush=True)
     rng0 = random.Random(7)
     allw = [w["word"] for w in S.W]; allh = [h["head"] for h in S.H]
     rh = [(rng0.sample(allw, 4), rng0.choice(allh)) for _ in range(a.games)]
-    out["rand"] = {lv: [G.score(w, h, {"thresh": G.KEN[lv]}) for w, h in rh] for lv in (0, 1, 2)}
+    out["rand"] = {lv: [G.score(w, h, G.params(lv)) for w, h in rh] for lv in (0, 1, 2)}
     out["variants"] = {}
     VAR = {"現状(しきい値3)": {}, "しきい値を一律+1(4)": {"thresh": 4}, "前置き→部位だけしきい値+1": {"thresh_add": {(0, 2): 1}}}
     for kind in ("strong", "weak"):

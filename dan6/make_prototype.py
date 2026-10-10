@@ -27,6 +27,20 @@ data = {
            for r in csv.DictReader(open(os.path.join(ROOT, "data", "word_tags_v1.csv"), encoding="utf-8-sig"))},
     "KZ": sorted(r["name"] for r in rd("yaku_class.csv") if r["class"].startswith("飾り")),
 }
+# 設定ファイル(data/*.csv)を試作に渡す(20261010-1925): 解禁表・周回と研究♡・しきい値・1周目のステージ条件・見本の仕込み・リナの台詞の頻度・句の上限/倍率
+def _csv(n): return list(csv.DictReader(open(os.path.join(ROOT, "data", n), encoding="utf-8-sig")))
+_sc = {r["key"]: r["value"].strip() for r in _csv("score_config.csv")}
+_ss = {r["key"]: r["value"].strip() for r in _csv("sample_seed.csv")}
+_pc = {r["key"]: r["value"].strip() for r in _csv("phrase_config.csv")}
+data["CFG"] = {
+    "UNLOCK": {r["key"]: [int(r["lv0"]), int(r["lv1"]), int(r["lv2"])] for r in _csv("score_unlock.csv")},
+    "LAP_KEN": sorted([int(r["lap"]), int(r["ken"])] for r in _csv("lap_config.csv")),
+    "KEN_MODE": _sc["KEN_MODE"], "KEN_CONST": int(_sc["KEN_CONST"]),
+    "STAGE_WINS": sorted([int(r["stage"]), int(r["wins_needed"])] for r in _csv("stage_wins_lap1.csv")),
+    "SAMPLE": {"on": _ss["SAMPLE_ENABLE"] == "1", "words": _ss["SAMPLE_WORDS"].split("|"), "lapMax": int(_ss["SAMPLE_LAP_MAX"])},
+    "LINA_EVERY": int({r["key"]: r["value"] for r in _csv("lina_config.csv")}["LINA_LINE_EVERY"]),
+    "PHRASE_CAP": int(_pc["PHRASE_CAP_PER_HAND"]), "PHRASE_MULT": (float(_pc["PHRASE_MULT"]) if _pc.get("PHRASE_MULT") else None),
+}
 # 山の牌の順(プロトタイプの C は、牌の字→枚数。ぉ゛・×2 を含む)
 p = os.path.join(ROOT, "prototype", "hiragana_tap_prototype.html")
 s = open(p, encoding="utf-8").read()
@@ -103,6 +117,10 @@ sub1("ura,total,near,", "ura,total,hi:hiR,near,")
 sub1("<h2>アガリ! ${d.total}翻 / ${pts(d.total)}点</h2>", "<h2>アガリ! ${d.total}翻 / ${fmtPts(pts(d.total))}点</h2><div class=\"hint\">ハイスコア ${fmtPts(d.hi.hi)}点${d.hi.isNew?\" ★更新!\":\"\"}</div>")
 sub1("pts(T).toLocaleString()+'点", "fmtPts(pts(T))+'点")
 sub1("${e.pts.toLocaleString()}点", "${fmtPts(e.pts)}点")
+# 点 -> 解読点(20261008-2250。画面の表示。内部の変数名は points のまま)
+for _a, _b in (("${fmtPts(pts(d.total))}点</h2>", "${fmtPts(pts(d.total))}解読点</h2>"), ("ハイスコア ${fmtPts(d.hi.hi)}点", "ハイスコア ${fmtPts(d.hi.hi)}解読点"),
+               ("fmtPts(pts(T))+'点", "fmtPts(pts(T))+'解読点"), ("${fmtPts(e.pts)}点", "${fmtPts(e.pts)}解読点")):
+    s = s.replace(_a, _b)
 sub1(".wcard{position:relative}.wcard .nw{position:absolute;top:-9px;right:-6px;background:#ff2d7a;color:#fff;font-size:.6rem;border-radius:6px;padding:0 4px}", ".wcard{position:relative}")
 # 8. 役エンジンの追加分(yaku14.py と同じ条件。slot: 選択子、語幹・修飾牌を変数にした1本化、種類(×2)、雀頭の系統の集合)
 sub1('tag:a[6]||"",slot:a[7]}));', 'tag:a[6]||"",slot:a[7],type:a[0]}));')
@@ -121,5 +139,59 @@ import proto_patch2
 s = proto_patch2.apply(s)
 import proto_patch3
 s = proto_patch3.apply(s)
+import proto_patch4
+s = proto_patch4.apply(s)
+import proto_patch5
+s = proto_patch5.apply(s)
+import proto_patch6
+s = proto_patch6.apply(s)
+import proto_patch7
+s = proto_patch7.apply(s)
+import proto_patch8
+s = proto_patch8.apply(s)
+import proto_patch9
+s = proto_patch9.apply(s)
+# ---- 一周版100語(20261010-1925 作業2): 語 data/words_ichishuu100.csv・山156枚・雀頭27。365語版は prototype/hiragana_tap_prototype_365.html に残す(従来の試験はこちら) ----
+open(os.path.join(ROOT, "prototype", "hiragana_tap_prototype_365.html"), "w", encoding="utf-8").write(s)
+sys.path.insert(0, os.path.join(ROOT, "ichishuu"))
+import sim_ichishuu as SI
+W100, _pairs, _usage = SI.load(); _v = SI.verify(W100, _pairs, _usage, rd("heads.csv"))
+_names = {w["word"] for w in W100}
+_wi = [i for i, w in enumerate(W) if set(w["word"].split("・")) & _names]
+_hn = {h["head"] for h in _v["heads"]}; _hi = [i for i, h in enumerate(H) if h["head"] in _hn]
+assert len(_wi) == 100 and len(_hi) == 27 and _v["wall"] == 156, (len(_wi), len(_hi), _v["wall"])
+data100 = dict(data, W=[data["W"][i] for i in _wi], A=[data["A"][i] for i in _wi], H=[data["H"][i] for i in _hi], HA=[data["HA"][i] for i in _hi],
+               C=dict(sorted(_v["copies"].items(), key=lambda kv: kv[0])))
+import phrase_types as PT
+_book = PT.PhraseBook(); _freq = PT.load_type_frequency()
+_nm = [data["W"][i][0] for i in _wi]; _id = {n: k for k, n in enumerate(_nm)}
+_pn = {r["語A"] + "|" + r["語B"]: r for r in _csv("phrase_names.csv")}
+_sb = []
+for _r in _csv("phrase_pairs_draft.csv"):
+    _x = _pn.get(_r["word_a"] + "|" + _r["word_b"]) or _pn[_r["word_b"] + "|" + _r["word_a"]]
+    _sb.append([_id[_r["word_a"]], _id[_r["word_b"]], _x["名前"].strip(), _x["1周目の誤読名"].strip()])
+_ty = {}
+for _t in _book.types:
+    _fa, _fb = PT.parse_filter(_t["a_filter"]), PT.parse_filter(_t["b_filter"]); _rl = _book._rules_for(_t["type_id"]); _seen = set(); _lst = []
+    for _a in _book.words:
+        if not PT.match(_a, _fa): continue
+        for _b in _book.words:
+            if _a is _b or not PT.match(_b, _fb) or not _book._ok(_rl, _a, _b): continue
+            _k = frozenset((_a["word"], _b["word"]))
+            if _k in _seen: continue
+            _seen.add(_k); _lst.append([_id[_a["word"]], _id[_b["word"]]])
+    assert _seen == _book.type_pairs[_t["type_id"]]
+    _ty[_t["type_id"]] = _lst
+_lines = {r["key"]: r["text"] for r in _csv("lina_lines.csv")}
+_tl = {r["type_id"]: r["lap1_template"] for r in _csv("phrase_type_lines.csv")}
+data100["CFG"] = dict(data["CFG"], PH=dict(names=_nm, SB=_sb, TY=_ty, TYD={t["type_id"]: dict(name=t["name"], desc=re.sub(r"\(2040[^)]*\)", "", t["description"]), lap1=_tl[t["type_id"]]) for t in _book.types},
+                      FREQ={k: v for k, v in _freq.items()}, LINES=_lines,
+                      MEMOS={r["word"]: dict(memo=r["1周目の研究メモ"], strike=r["取り消し線の部分"], fix=r["訂正後(赤字)"]) for r in _csv("lina_memos_100.csv")}))
+i = s.index("const DATA=") + len("const DATA="); _, end = json.JSONDecoder().raw_decode(s[i:])
+s = s[:i] + json.dumps(data100, ensure_ascii=False) + s[i + end:]
+_old = 'if(i===undefined)throw new Error("辞書にない語: "+tok);a[i]=1;'
+assert _old in s
+s = s.replace(_old, 'if(i!==undefined)a[i]=1;')   # 一周版100語: 役の語の集合のうち、100語にない語は外す(yaku14.py はフル辞書で数えるが、100語の手では同じ結果)
+s = s.replace(f"dan6 の語{len(W)}・雀頭{len(H)}・山{sum(data['C'].values())}枚", f"一周版の語{len(_wi)}・雀頭{len(_hi)}・山{sum(data100['C'].values())}枚(365語版は _365.html)")
 open(p, "w", encoding="utf-8").write(s)
-print("試作HTMLを更新: 語", len(W), "役", len(Y), "合体", len(M), "山", sum(data["C"].values()), "枚")
+print("試作HTMLを更新: 365語版 語", len(W), "山", sum(data["C"].values()), "枚 / 100語版 語", len(_wi), "雀頭", len(_hi), "山", sum(data100["C"].values()), "枚 / 役", len(Y), "合体", len(M))

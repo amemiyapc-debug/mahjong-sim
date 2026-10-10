@@ -1,5 +1,5 @@
 /* dan6:show */
-// ===== アガリ演出(20261007-1345・1350): タイプライター(4文字/秒・金文字・石碑)→ ジングル → パワー溜め → 点リール → 最終(ガチャ風・碑文に刻む) =====
+// ===== アガリ演出(20261007-1345・1350): タイプライター(4文字/秒・金文字・石碑)→ ジングル → パワー溜め → 解読点リール → 最終(ガチャ風・碑文に刻む) =====
 let STONE_URL=null;
 function stoneURL(){
   if(STONE_URL!==null)return STONE_URL;
@@ -35,8 +35,8 @@ async function reelTo(a,b,ms){
   const steps=skipShow?1:Math.max(3,Math.round(ms/40));
   for(let i=1;i<=steps;i++){const e=1-Math.pow(1-i/steps,3);const v=i===steps?b:a*Math.pow(b/a,e);let t=fmtPts(v);
     if(i<steps)t=t.replace(/\d(?=\D*$)/,()=>String(Math.floor(Math.random()*10)));
-    el.textContent=t+"点";if(!skipShow)SFX.tick();await slShow(40);}
-  el.dataset.points=String(Math.round(b));el.textContent=fmtPts(b)+"点";
+    el.textContent=t+"解読点";if(!skipShow)SFX.tick();await slShow(40);}
+  el.dataset.points=String(Math.round(b));el.textContent=fmtPts(b)+"解読点";
 }
 let slShow=()=>Promise.resolve();
 async function playShow(){
@@ -51,7 +51,7 @@ async function playShow(){
   const st=$$("sh-stone"),gr=$$("sh-graph");st.classList.remove("carved");gr.style.boxShadow="";gr.style.background="";
   const su=stoneURL();if(su)st.style.backgroundImage="url("+su+")";
   $$("sh-title").innerHTML='<span class="bigpop" style="display:inline-block">アガリ!</span>';
-  // 1) タイプライター: 完成した淫語(全文)→ 点に効く名前つき役(+N淫)。1文字 約250ms(1秒に4文字)。打っている間は「カシャ」だけ(メロディなし)
+  // 1) タイプライター: 完成した淫語(全文)→ 解読点に効く名前つき役(+N淫)。1文字 約250ms(1秒に4文字)。打っている間は「カシャ」だけ(メロディなし)
   const typ=$$("sh-type"),lines=[{t:d.sentence,c:"ln"}];
   const ys=sc.items.filter(x=>x.merge||!KZ.has(x.name)).slice().sort((a,b)=>b.han-a.han).map(x=>({t:x.name+" +"+x.han+"淫",c:"ln yk"}));
   if(d.ura>0)ys.unshift({t:"裏読み +"+d.ura+"淫",c:"ln yk"});
@@ -75,14 +75,14 @@ async function playShow(){
     gr.style.boxShadow="0 0 "+(8+lvl*6)+"px "+col+", inset 0 0 "+(10+lvl*8)+"px "+col+"88";gr.style.background="rgba(155,93,229,"+(0.08+lvl*0.05)+")";
     linkSnd(s);await sl(270);
   }
-  // 掛け算: 句ボーナス → 連鎖倍率 → テーマ倍率。点リールが、掛け算のたびに回る
-  const T=$$("sh-total");T.innerHTML='<div class="reel" id="sh-reel" data-points="500">500点</div>';
+  // 掛け算: 句ボーナス → 連鎖倍率 → テーマ倍率。解読点リールが、掛け算のたびに回る
+  const T=$$("sh-total");T.innerHTML='<div class="reel" id="sh-reel" data-points="500">500解読点</div>';
   const MC=["#7b2cbf","#b5179e","#f72585"],steps=[["句ボーナス",g.bonus],["連鎖",g.chain],["テーマ",g.theme]];let cur=G6.FLOOR;
   for(let i=0;i<3;i++){const [nm,f]=steps[i];const e=document.createElement("span");e.className="mc";e.style.setProperty("--mc",MC[i]);e.textContent=nm+" ×"+fx(f);$$("sh-mults").appendChild(e);multSnd(i);
     const nv=cur*f;await reelTo(cur,nv,f>1?350:120);cur=nv;}
-  // 4) 最終: ガチャ風のキラキラ。最終の点が確定し、金文字の全文が碑文に刻み込まれる
+  // 4) 最終: ガチャ風のキラキラ。最終の解読点が確定し、金文字の全文が碑文に刻み込まれる
   gachaSfx();flashScreen();shakeBox();confetti(40);
-  T.innerHTML='<div class="reel big bigpop" id="sh-reel" data-points="'+Math.round(g.points)+'">'+fmtPts(g.points)+'点</div><small>500 × 句ボーナス '+g.bonus+' × 連鎖 '+fx(g.chain)+' × テーマ '+g.theme+'</small>'+(d.st?'<br><small>'+d.st+'</small>':'');
+  T.innerHTML='<div class="reel big bigpop" id="sh-reel" data-points="'+Math.round(g.points)+'">'+fmtPts(g.points)+'解読点</div><small>500 × 句ボーナス '+g.bonus+' × 連鎖 '+fx(g.chain)+' × テーマ '+g.theme+'</small>'+(d.st?'<br><small>'+d.st+'</small>':'');
   st.classList.add("carved");await sl(1000);
   skipShow=false;showRunning=false;$$("sh-skip").hidden=true;$$("sh-close").hidden=false;$$("sh-ingo").hidden=false;refreshStar();
 }catch(e){if(e!==CANCEL)throw e;}

@@ -17,13 +17,69 @@ FLOOR = 500
 SLOT_NAMES = ['前置き', '感情・誘い', '部位', '行為', '音', '反応', '喘ぎ声']
 STAGE_NAMES = {1: '語', 2: '句', 3: '節', 4: '文', 5: '碑文'}
 LV_NAMES = ['無知', '恥ずかしい', 'すけべ']      # 研究♡の呼び名(内部の数値は 0/1/2)
-KEN = {0: 4, 1: 3, 2: 2}                       # 研究♡ -> 語呂のしきい値(仮)。上がると、新しい語呂が「解放」される
+KEN = {0: 4, 1: 3, 2: 2}                       # 研究♡ -> 語を結ぶしきい値(data/score_config.csv の KEN_MODE=table のとき使う。20261010-1210 で table に決定。研究♡0は点に影響しない)
 SKIPS = {0: 1, 1: 2, 2: 3}                     # 研究♡ -> 見送り回数(仮。1ステージの全ゲームで共有)
+DEFAULT_THRESH = 3                             # KEN_CONST が空のときの値(KEN_MODE=const で使う)
 
 
-def ken_stage(stage):
-    """ステージ番号 -> 研究♡(ステージ1〜2=0 無知、3〜5=1 恥ずかしい、6以降=2 すけべ)"""
-    return 0 if stage <= 2 else 1 if stage <= 5 else 2
+def _read_csv(name):
+    with open(os.path.join(ROOT, 'data', name), encoding='utf-8-sig', newline='') as f:
+        return list(csv.DictReader(f))
+
+
+def load_unlock(path_name='score_unlock.csv'):
+    """点の解禁表(data/score_unlock.csv)-> {項目キー: {研究♡: 0/1}}。キー: base/en/yaku/phrase/chain/theme"""
+    return {r['key']: {lv: int(r['lv%d' % lv]) for lv in (0, 1, 2)} for r in _read_csv(path_name)}
+
+
+def load_lap(path_name='lap_config.csv'):
+    """周回数 -> 研究♡(data/lap_config.csv。lap 列の最大値の行は「その周回以降」)"""
+    return sorted((int(r['lap']), int(r['ken'])) for r in _read_csv(path_name))
+
+
+def load_score_config(path_name='score_config.csv'):
+    c = {r['key']: r['value'].strip() for r in _read_csv(path_name)}
+    return dict(KEN_MODE=c.get('KEN_MODE', 'table') or 'table', KEN_CONST=int(c.get('KEN_CONST') or DEFAULT_THRESH))
+
+
+def load_stage_wins(path_name='stage_wins_lap1.csv'):
+    """1周目(研究♡0)のステージ条件: ステージ番号 -> 3ゲームのうち必要な和了の回数(data/stage_wins_lap1.csv)"""
+    return sorted((int(r['stage']), int(r['wins_needed'])) for r in _read_csv(path_name))
+
+
+UNLOCK = load_unlock()
+STAGE_WINS = load_stage_wins()
+LAP_KEN = load_lap()
+CONFIG = load_score_config()
+
+
+def ken_lap(lap):
+    """周回数 -> 研究♡(1周目=0 無知、2周目=1 恥ずかしい、3周目以降=2 すけべ。data/lap_config.csv)。ステージ番号では変わらない"""
+    lv = LAP_KEN[0][1]
+    for l, k in LAP_KEN:
+        if lap >= l:
+            lv = k
+    return lv
+
+
+def wins_needed(stage):
+    """1周目のステージ条件(和了の回数)。表にないステージは、最後の行の値"""
+    n = STAGE_WINS[0][1]
+    for st, w in STAGE_WINS:
+        if stage >= st:
+            n = w
+    return n
+
+
+def thresh_of(lv, mode=None):
+    """研究♡ -> 語を結ぶしきい値。KEN_MODE=table(既定。20261010-1210): KEN[lv](研究♡1=3、研究♡2=2)。KEN_MODE=const: 一定(KEN_CONST)"""
+    mode = mode or CONFIG['KEN_MODE']
+    return KEN[lv] if mode == 'table' else CONFIG['KEN_CONST']
+
+
+def params(lv, mode=None, **kw):
+    """score()/best_hand() に渡す P。lv を入れると、解禁表のとおりの項目だけが点になる"""
+    return dict(thresh=thresh_of(lv, mode), lv=lv, **kw)
 
 
 def _stem(r):
@@ -259,7 +315,7 @@ def yaku_in(S, r):
     return sum(h for n, h in r['added'].items() if n in r['yaku'] and n not in KAZARI) + sum(mh[n] for n in r['merges'])
 
 
-def score(words, head, P=None, yin=0):
+def score(words, head, P=None, yin=0, phrase_mult=1.0):
     """words: 語名の4つ、head: 雀頭名(【雀頭】なし)、yin: 名前つき役の淫の合計。返り値: dict"""
     nodes = [node(w) for w in words] + [node(head, True)]
     L = []
@@ -270,13 +326,24 @@ def score(words, head, P=None, yin=0):
     C = collapse(nodes, L)
     m, comp = _chain_count(nodes, C)
     ch = mult(m)
-    bonus = 1 + sum(min(3, s - 2) for a, b, s in C) + yin     # 句ボーナス = 1 + Σつながり + Σ名前つき役の淫
+    en = sum(min(3, s - 2) for a, b, s in C)                   # 縁(旧名: つながり)
+    bonus_full = 1 + en + yin                                  # 句ボーナス = 1 + Σ縁 + Σ名前つき役の淫
     tm, tn, k = best_theme(nodes)
     size = max([c[0] for c in comp.values()] + [1])            # つながった語の数の最大(語1・句2・節3・文4・碑文5)
     kk, compo = theme_counts(nodes)
-    return dict(links=len(C), raw_links=len(L), merges=m, chain=ch, bonus=bonus, yin=yin, theme=tm, theme_name=tn, theme_k=kk,
+    # 句(語A+語B。看板・型)の得点(PHRASE_POINTS。data/phrase_config.csv)は、ここ(points を出したあと)に、表示した句の数×PHRASE_POINTS を足す案。未決のため、まだ入れない(20261008-2110)
+    # 解禁表(data/score_unlock.csv): P['lv'] があれば、その研究♡で解禁された項目だけを点に入れる。成立の判定(縁・連鎖・テーマ・句)は常に行う
+    lv = (P or {}).get('lv')
+    u = (lambda k: 1) if lv is None else (lambda k: UNLOCK[k][lv])
+    bonus = 1 + en * u('en') + yin * u('yaku')
+    ch_a = ch if u('chain') else 1
+    tm_a = tm if u('theme') else 1
+    pm_a = phrase_mult if u('phrase') else 1
+    pts = FLOOR * bonus * ch_a * tm_a * pm_a if u('base') else 0
+    return dict(links=len(C), raw_links=len(L), merges=m, chain=ch, bonus=bonus, bonus_full=bonus_full, en=en, yin=yin, lv=lv,
+                points_full=FLOOR * bonus_full * ch * tm * phrase_mult, theme=tm, theme_name=tn, theme_k=kk,
                 composite=compo, size=size, stage_name=STAGE_NAMES[size],
-                points=FLOOR * bonus * ch * tm, pairs=C)
+                points=pts, pairs=C)
 
 
 JA_UNITS = [(10 ** 16, '京'), (10 ** 12, '兆'), (10 ** 8, '億'), (10 ** 4, '万')]

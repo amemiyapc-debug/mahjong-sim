@@ -1,0 +1,15 @@
+rule_id,type_id,kind,side,filter,partner_filter,note
+R00,ALL,exclude,any,word=つがい,,「つがい」は型の句に使わない(看板の つがい+こうび だけで使う)
+R02a,2,allow_only,B,word=ちん舐め|ちんコキ,sub=男性器,行為の語に部位名が入るものは、合う部位とだけ組む
+R02b,2,allow_only,B,word=まん舐め,sub=女性器,
+R02c,2,allow_only,B,word=くり舐め,word=おまめ|ぬれくり,
+R02d,2,allow_only,B,word=ぱいコキ,sub=胸,
+R03,3,exclude,B,word=しゃせい|がんしゃ|まんしゃ,,反応のうち しゃせい・がんしゃ・まんしゃ は組まない
+R04,4,allow_only,B,word=しゃせい|がんしゃ|まんしゃ,word=ちん舐め|ちんコキ|ぱいコキ|こうび,しゃせい・がんしゃ・まんしゃ は、行為が ちん舐め・ちんコキ・ぱいコキ・こうび のときだけ組む
+R05a,5,exclude,A,sub=男性器,,Aから男性器を外す
+R05b,5,exclude,B,word=いけっ|おちろ|さけべ,,Bは なめろ・せめろ だけにする
+R06a,6,allow_only,A,sub=女性器,slot=音,部位ごとに使える音を限る: 女性器=音8語すべて
+R06b,6,allow_only,A,sub=後ろ,word=ぱんぱん|ぱこぱこ|ぱちん,後ろ=ぱんぱん・ぱこぱこ・ぱちん
+R06c,6,allow_only,A,sub=男性器,word=ぱんぱん|ぱこぱこ,男性器=ぱんぱん・ぱこぱこ
+R06d,6,allow_only,A,sub=胸,word=ぱちん,胸=ぱちん
+R08,8,exclude,B,sub=命令・誘い,,Bから命令(なめろ・せめろ・いけっ・おちろ・さけべ)を外す

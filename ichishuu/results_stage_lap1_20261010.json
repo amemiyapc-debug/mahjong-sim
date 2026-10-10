@@ -1,0 +1,57 @@
+{
+ "games": 12000,
+ "counts": {
+  "nowin": 507,
+  "win": 8107,
+  "tenpai": 3386
+ },
+ "win_rate_of_all": 67.55833333333334,
+ "tenpai_rate": 28.216666666666665,
+ "p_win_per_consumed_game": 0.9411423264453216,
+ "need": {
+  "1": 1,
+  "2": 2,
+  "3": 3
+ },
+ "runs": 1278,
+ "unused_games": 5,
+ "over": 0.2347417840375587,
+ "over_count": 3,
+ "cleared_last": 99.76525821596245,
+ "per_attempt_clear": {
+  "1": {
+   "attempts": 1278,
+   "rate": 100.0
+  },
+  "2": {
+   "attempts": 1297,
+   "rate": 98.53508095605243
+  },
+  "3": {
+   "attempts": 1495,
+   "rate": 85.28428093645485
+  }
+ },
+ "over_at_stage": {
+  "1": 0,
+  "2": 0,
+  "3": 3
+ },
+ "analytic": {
+  "per_attempt_clear": {
+   "1": 99.9796103732495,
+   "2": 99.00151153262028,
+   "3": 83.3615760277267
+  },
+  "game_over": 0.4856179736927646
+ },
+ "games_per_run": {
+  "consumed_mean": 6.736306729264475,
+  "consumed_median": 6.0,
+  "consumed_max": 14,
+  "played_mean": 9.385758998435055,
+  "played_median": 9.0,
+  "played_max": 23
+ },
+ "first_digest": "70da84563ac83905"
+}

@@ -324,14 +324,24 @@ class Game:
         res = max((self.hint(ci, sup) for ci in cand), key=lambda x: x[0])
         return self.actual_discard(hand, res[1]), False
 
-    def play(self, rng, skip=None):
+    def play(self, rng, skip=None, seed_tiles=None):
         """1ゲーム。skip(hand, turn, r) -> bool を渡すと、アガリが成立したときに「見送る」かを決められる(dan6)。
         見送ると、cpu の捨て牌選びで1枚捨てて13牌に戻り、残りのツモで続ける。残りのツモ内に完成しなければ「ノーテン扱い」(skipfail=True)。
-        ツモ上限 L では見送れない(残りのツモが0)。"""
+        ツモ上限 L では見送れない(残りのツモが0)。
+        seed_tiles(20261010-1920 C 見本の仕込み): 配牌に必ず含める牌の一覧。山から取り除いて配牌に入れ、残りの配牌は山から引く。None なら従来どおり。"""
         wall = self.wall0[:]
         rng.shuffle(wall)
-        wc = Counter(wall)
-        hand = [wall.pop() for _ in range(HAND)]
+        if seed_tiles:
+            first = []
+            for t in seed_tiles:
+                wall.remove(t)
+                first.append(t)
+            wc = Counter(wall)
+            wc.update(first)
+            hand = first + [wall.pop() for _ in range(HAND - len(first))]
+        else:
+            wc = Counter(wall)
+            hand = [wall.pop() for _ in range(HAND)]
         for t in hand:
             wc[t] -= 1
         first_tenpai = None
