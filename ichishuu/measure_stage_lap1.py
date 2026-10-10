@@ -2,7 +2,7 @@
 規則: 1ステージ=3ゲーム、ライフ3。アガリ・ノーテンは1ゲーム消費、テンパイ流局は消費しない。必要回数に達した時点でクリア、3ゲーム使って届かなければライフ-1・同じステージをやり直し。
 強CPU(hint)・一周版100語・残りツモ12・seed 20261008+i(i < N)。試合の流れを順に使う(1回の挑戦=ステージ1から。ステージ3クリアかゲームオーバーで終わる)。
 python3 ichishuu/measure_stage_lap1.py [N=12000]"""
-import json, os, sys, math, hashlib
+import json, os, sys, math, hashlib, statistics
 from collections import Counter
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(ROOT, "ichishuu")); sys.path.insert(0, os.path.join(ROOT, "dan6"))
@@ -17,20 +17,20 @@ def run_stream(results, need):
     i, n, runs = 0, len(results), []
     while True:
         stage, lives, att, used_i = 1, 3, [], i
-        hist = []
+        hist = []; consumed = 0
         while lives > 0 and stage <= LAST:
             wins, cons = 0, 0
             while cons < 3:
                 if i >= n: return runs, n - used_i
                 r = results[i]; i += 1
                 if r == "tenpai": continue            # テンパイ流局: ゲームを消費しない
-                cons += 1; wins += (r == "win")
+                cons += 1; consumed += 1; wins += (r == "win")
                 if wins >= need(stage): break
             ok = wins >= need(stage)
             hist.append((stage, ok))
             if ok: stage += 1
             else: lives -= 1
-        runs.append(dict(hist=hist, over=(lives == 0), cleared_last=(stage > LAST)))
+        runs.append(dict(hist=hist, over=(lives == 0), cleared_last=(stage > LAST), consumed=consumed, played=i - used_i))
 
 
 def analytic(p, need):
@@ -71,6 +71,8 @@ def main():
                per_attempt_clear={s: dict(attempts=att[s], rate=100 * ok[s] / att[s]) for s in range(1, LAST + 1) if att[s]},
                over_at_stage={s: over_at[s] for s in range(1, LAST + 1)},
                analytic=dict(per_attempt_clear={s: 100 * cs[s - 1] for s in range(1, LAST + 1)}, game_over=100 * pover),
+               games_per_run=dict(consumed_mean=statistics.mean(r["consumed"] for r in runs), consumed_median=statistics.median(r["consumed"] for r in runs), consumed_max=max(r["consumed"] for r in runs),
+                                  played_mean=statistics.mean(r["played"] for r in runs), played_median=statistics.median(r["played"] for r in runs), played_max=max(r["played"] for r in runs)),
                first_digest=hashlib.sha256(json.dumps(res[:1000]).encode()).hexdigest()[:16])
     json.dump(out, open(os.path.join(ROOT, "ichishuu", "results_stage_lap1_20261010.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(json.dumps(out, ensure_ascii=False, indent=1))

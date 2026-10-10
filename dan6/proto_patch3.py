@@ -109,7 +109,7 @@ def apply(s):
     region("function itemsHTML(sc){", "function winHTML(){", ITEMS)
     sub1("ura,total,gs,lv:lvNow,", "ura,total,gs,lv:lvNow,firstIn:explainIn(total),")
     sub1("  s+=`<div style=\"margin-top:6px\">${itemsHTML(d.own.sc)}</div>`;",
-         "  s+=`<div style=\"margin-top:6px\">${itemsHTML(d.own.sc)}</div>`;\n  if(d.firstIn)s+=`<div class=\"hint\" style=\"margin-top:4px\"><b>淫</b>とは: 名前つき役の数字です。句ボーナスに足されて、解読点が増えます(例: +3淫なら、句ボーナスが +3)。</div>`;")
+         "  s+=`<div style=\"margin-top:6px\">${itemsHTML(d.own.sc)}</div>`;\n  if(d.firstIn)s+=`<div class=\"hint\" style=\"margin-top:4px\"><b>淫</b>とは: 名前つき役の数字です。縁に足されて、解読点が増えます(例: +3淫なら、縁が +3)。</div>`;")
     sub1("  if(won.kept<won.total)s+=`<div class=\"hint\" style=\"margin-top:6px\">手で組んだ形のうち ${won.kept}/${won.total} をそのまま使い、残りは自動で組みました。</div>`;",
          "  if(won.user>won.kept)s+=`<div class=\"hint rearr\" style=\"margin-top:6px\"><b>組み替えました</b>。自分で組んだ ${won.user} 個のうち ${won.kept} 個はそのまま使い、残りは、アガリになる形に組み替えました。</div>`;\n"
          "  else if(won.kept<5)s+=`<div class=\"hint\" style=\"margin-top:6px\">自分で組んだ ${won.kept} 個はそのまま。残りの牌は、解読点が最大になる分け方で自動で組みました。</div>`;")

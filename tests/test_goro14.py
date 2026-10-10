@@ -41,7 +41,7 @@ ok("最低点は500(何もつながらない手では 500)", all(G.score(rng.sam
 ok("表示: 万・億・兆・京(切り捨て1桁)", [G.fmt_points(v) for v in (500, 12345, 99999, 3.2e9, 7.7e13, 1e17, 123e8)] == ["500", "1.2万", "9.9万", "32億", "77兆", "10京", "123億"])
 ok("研究♡は周回数で決まる: 1周目=0 無知、2周目=1 恥ずかしい、3周目以降=2 すけべ。見送り 1/2/3回", [G.ken_lap(l) for l in (1, 2, 3, 4, 9)] == [0, 1, 2, 2, 2] and G.LV_NAMES == ["無知", "恥ずかしい", "すけべ"] and G.SKIPS == {0: 1, 1: 2, 2: 3} and not hasattr(G, "ken_stage"))
 ok("しきい値: 既定は KEN_MODE=table(研究♡0/1/2=4/3/2。研究♡1=3・研究♡2=2)。KEN_CONST は残り、const に切り替えると一定の3", G.CONFIG["KEN_MODE"] == "table" and [G.thresh_of(l) for l in (0, 1, 2)] == [4, 3, 2] and G.KEN == {0: 4, 1: 3, 2: 2} and [G.thresh_of(l, "const") for l in (0, 1, 2)] == [3, 3, 3] and G.CONFIG["KEN_CONST"] == 3 and G.params(2)["thresh"] == 2 and G.params(2, "const")["thresh"] == 3)
-ok("1周目のステージ条件(和了回数。data/stage_wins_lap1.csv): ステージ1=1回以上 / 2=2回以上 / 3=2回以上(4以降は最後の行)", [G.wins_needed(s_) for s_ in (1, 2, 3, 4, 9)] == [1, 2, 2, 2, 2])
+ok("1周目のステージ条件(和了回数。data/stage_wins_lap1.csv。案A 20261010-1920): ステージ1=1回以上 / 2=2回以上 / 3=3回(4以降は最後の行)", [G.wins_needed(s_) for s_ in (1, 2, 3, 4, 9)] == [1, 2, 3, 3, 3])
 # --- 解禁表(data/score_unlock.csv)---
 _rg = random.Random(5)
 HW, HH = next((w, h) for w, h in ((_rg.sample(names_w, 4), _rg.choice(names_h)) for _ in range(5000)) if G.score(w, h)["chain"] > 1 and G.score(w, h)["theme"] > 1)   # 連鎖もテーマも効く手

@@ -25,7 +25,7 @@ def apply(s):
         s = s[:i0] + new + s[i1:]
 
     # --- 説明文 ---
-    s = re.sub(r'<p class="note">.*?</p>', '<p class="note">dan6 の語365・雀頭28・山361枚で動く試作。名前つき役は「淫」、解読点 = 500 × 句ボーナス × 連鎖 × テーマ。ステージ制(研究♡0/1/2・見送り)つき(「ランダム配牌」から)。CPUはありません。</p>', s, count=1, flags=re.S)
+    s = re.sub(r'<p class="note">.*?</p>', '<p class="note">dan6 の語365・雀頭28・山361枚で動く試作。名前つき役は「淫」、解読点 = 500 × 縁 × 連鎖 × テーマ。ステージ制(研究♡0/1/2・見送り)つき(「ランダム配牌」から)。CPUはありません。</p>', s, count=1, flags=re.S)
     # --- 点の表(翻→点)を外し、語呂度エンジンを入れる ---
     if "/* dan6:goro */" not in s:
         i0 = s.index("function pts(h){"); i1 = s.index("\n", i0) + 1
@@ -107,7 +107,7 @@ def apply(s):
   const d=won.data;
   if(!d)return `<h2>アガリ!</h2><div class="hint">役を数えています…</div>`;
   const g=d.gs;
-  let s=`<h2>アガリ! ${fmtPts(g.points)}解読点</h2><div class="hint">ハイスコア ${fmtPts(d.hi.hi)}解読点${d.hi.isNew?" ★更新!":""}</div><div class="hint">解読点 = 500 × 句ボーナス ${g.bonus}(1 + つながり ${g.linkBonus} + 名前つき役 ${g.yin}翻) × 連鎖 ${g.chain.toFixed(g.chainN?2:0)}(連鎖${g.chainN}) × テーマ ${g.theme}(${g.themeName})。つながりは「${STAGE_WORD[g.size]}」。${LAP}周目・研究♡「${LVN[d.lv]}」(語を結ぶしきい値 ${thOf(d.lv)})。${d.lv<2?"まだ読み解けていない項目は解読点に入りません: "+(d.lv<1?"縁(つながり)・名前つき役の淫・句・":"")+"連鎖・テーマ"+(d.lv<1?"(基本点の500のみ)":"")+"。":""}</div>`;
+  let s=`<h2>アガリ! ${fmtPts(g.points)}解読点</h2><div class="hint">ハイスコア ${fmtPts(d.hi.hi)}解読点${d.hi.isNew?" ★更新!":""}</div><div class="hint">解読点 = 500 × 縁 ${g.bonus}(1 + つながり ${g.linkBonus} + 名前つき役 ${g.yin}翻) × 連鎖 ${g.chain.toFixed(g.chainN?2:0)}(連鎖${g.chainN}) × テーマ ${g.theme}(${g.themeName})。つながりは「${STAGE_WORD[g.size]}」。${LAP}周目・研究♡「${LVN[d.lv]}」(語を結ぶしきい値 ${thOf(d.lv)})。${d.lv<2?"まだ読み解けていない項目は解読点に入りません: "+(d.lv<1?"縁(つながり)・名前つき役の淫・句・":"")+"連鎖・テーマ"+(d.lv<1?"(基本点の500のみ)":"")+"。":""}</div>`;
   s+=`<div class="sc" style="margin-top:6px;font-size:1.1rem;font-weight:900">「${d.sentence}」</div><div class="ig-meta"><span class="ig-lab ${gcls(d.gl.name)}">${d.gl.name}</span>${d.gl.text}${d.linkPairs.length?" ・ しりとり成立! "+d.linkPairs.join(" "):""}</div>`;
   s+=`<div class="sh-btns" style="justify-content:flex-start;margin:6px 0"><button class="b" id="star2">☆ 傑作にする</button><button class="b" id="copy2">コピー</button></div><div class="hint">淫語集に保存しました。</div>`;
   s+=`<div style="margin-top:6px">${itemsHTML(d.own.sc)}</div>`;
@@ -128,7 +128,7 @@ def apply(s):
     region("  // 6) 合計\n", '  skipShow=false;showRunning=false;$$("sh-skip").hidden=true', '''  // 6) 合計(点)
   const T=d.total,g=d.gs;
   for(let i=shown;i<=T&&!skipShow;i++){setTotal(i);SFX.tick();await sl(60);}
-  $$("sh-total").innerHTML='<span class="big bigpop" style="display:inline-block">'+fmtPts(g.points)+'解読点</span><br><small>500 × 句ボーナス '+g.bonus+' × 連鎖 '+(g.chainN?g.chain.toFixed(2):1)+' × テーマ '+g.theme+'</small>'+(d.st?'<br><small>'+d.st+'</small>':'');
+  $$("sh-total").innerHTML='<span class="big bigpop" style="display:inline-block">'+fmtPts(g.points)+'解読点</span><br><small>500 × 縁 '+g.bonus+' × 連鎖 '+(g.chainN?g.chain.toFixed(2):1)+' × テーマ '+g.theme+'</small>'+(d.st?'<br><small>'+d.st+'</small>':'');
   if(T>=5||mergeItems.length||g.points>=100000){SFX.fan();flashScreen();shakeBox();confetti(40);}else SFX.jan(Math.max(1,T));
 ''')
     # --- 「翻」を「淫」に(DATA の行は触らない) ---

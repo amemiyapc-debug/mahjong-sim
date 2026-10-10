@@ -158,8 +158,8 @@ with sync_playwright() as p:
     o = r["out"]
     ok("1周目のステージ2(2回以上): 1回目の和了は「和了 1/3」でクリアしない(ゲーム消費)、2回目でクリアしてステージ3。ステージバーに「和了 n/3」", "和了 0/3" in o[0][2] and o[1][1] == 2 and o[1][0] == 1 and o[1][2] == 2 and "和了 1/3" in o[1][3] and o[2][1] == 3 and o[2][0] == 0 and "和了 0/3" in o[2][3], str(r)[:300])
     ok("ステージをクリアしても、研究♡は上がらない(1周目は無知のまま)。通知も出ない", r["a"] == 0 and r["b"] == 0 and not r["news"] and "無知" in o[2][3] and "1周目" in o[2][3], str(r)[:200])
-    r = pg.evaluate("""()=>{ dealRandom(); LAP=1; STG.stage=1; newTry(); const gs={size:1,themeK:0,composite:[]}; commitWin(gs); const s1=STG.stage; STG.stage=3; newTry(); commitWin(gs); const s3a=STG.stage; commitWin(gs); return [s1, s3a, STG.stage, [1,2,3,4,5].map(winsNeeded)]; }""")
-    ok("ステージ1は1回で、ステージ3は2回でクリア。表にないステージは最後の値(設定 data/stage_wins_lap1.csv と同じ)", r == [2, 3, 4, [G6.wins_needed(x) for x in (1, 2, 3, 4, 5)]] and r[3] == [1, 2, 2, 2, 2], str(r))
+    r = pg.evaluate("""()=>{ dealRandom(); LAP=1; STG.stage=1; newTry(); const gs={size:1,themeK:0,composite:[]}; commitWin(gs); const s1=STG.stage; STG.stage=3; newTry(); commitWin(gs); const s3a=STG.stage; commitWin(gs); const s3b=STG.stage; commitWin(gs); return [s1, s3a, s3b, STG.stage, [1,2,3,4,5].map(winsNeeded)]; }""")
+    ok("ステージ1は1回、ステージ3は3回(案A)でクリア。表にないステージは最後の値(設定 data/stage_wins_lap1.csv と同じ)", r == [2, 3, 3, 4, [G6.wins_needed(x) for x in (1, 2, 3, 4, 5)]] and r[4] == [1, 2, 3, 3, 3], str(r))
     r = pg.evaluate("""()=>{ dealRandom(); LAP=1; STG.stage=2; STG.lives=3; newTry(); const gs={size:1,themeK:0,composite:[]}; let m=''; for(let i=0;i<3;i++){ if(i===0)commitWin(gs); else {m=consumeGame();} } return {lives:STG.lives, stage:STG.stage, game:STG.game, wins:STG.wins}; }""")
     ok("3ゲーム使って和了が足りないと、ライフ-1で同じステージをやり直す(和了の数は0に戻る)", r["lives"] == 2 and r["stage"] == 2 and r["game"] == 1 and r["wins"] == 0, str(r))
     pg.evaluate("()=>{LAP=3;}")   # 以降の照合は、すべて解禁した研究♡2(3周目)で行う(1周目は500点で固定のため、点の大小を比べられない)

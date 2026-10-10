@@ -6,13 +6,14 @@ const G6={BASE:{"0,1":1,"0,2":3,"0,3":1,"1,2":2,"1,3":2,"1,5":1,"1,6":1,"2,3":3,
  COMP:[["くりでイく","くり","絶頂"],["まんでイく","部位:女性器","絶頂"],["ちんでイく","部位:男性器","絶頂"],["胸でイく","部位:胸","絶頂"],["お尻でイく","部位:後ろ","絶頂"],["口でイく","部位:口","絶頂"],["ラブキス","キス","ラブ"],["調教","SM","態度"],["命令調教","SM","命令"],["濡れ濡れ","ぬれ","水音"],["見せつけ","見せ","絶頂"]],
  CL:{1:1,2:1,3:2,4:4,5:8},FLOOR:500};
 const LVN=["無知","恥ずかしい","すけべ"],KEN=[4,3,2],SKIPN=[1,2,3];   // 研究♡0/1/2: 旧方式の語呂のしきい値 KEN(削除しない)・見送り回数(仮)
-const KEN_MODE="table",KEN_CONST=3;                                       // data/score_config.csv。table=研究♡ごとのKEN(4/3/2。20261010-1210で決定)、const=一定(KEN_CONST)
+const CFG=DATA.CFG;                                                       // data/*.csv を make_prototype.py が渡す(設定ファイルで変えられる)
+const KEN_MODE=CFG.KEN_MODE,KEN_CONST=CFG.KEN_CONST;                                       // data/score_config.csv。table=研究♡ごとのKEN(4/3/2。20261010-1210で決定)、const=一定(KEN_CONST)
 const thOf=lv=>KEN_MODE==="table"?KEN[lv]:KEN_CONST;
-const UNLOCK={base:[1,1,1],en:[0,1,1],yaku:[0,1,1],phrase:[0,1,1],chain:[0,0,1],theme:[0,0,1]};   // data/score_unlock.csv(研究♡0/1/2)
-const LAP_KEN=[[1,0],[2,1],[3,2]];                                         // data/lap_config.csv: 周回数 -> 研究♡(3周目以降=2)
+const UNLOCK=CFG.UNLOCK;   // data/score_unlock.csv(研究♡0/1/2)
+const LAP_KEN=CFG.LAP_KEN;                                        // data/lap_config.csv: 周回数 -> 研究♡(3周目以降=2)
 function kenLap(lap){let k=LAP_KEN[0][1];for(const [l,v] of LAP_KEN)if(lap>=l)k=v;return k;}
 let LAP=1;try{const q=+new URLSearchParams(location.search).get("lap");if(q>=1)LAP=Math.floor(q);}catch(e){}   // 周回数。?lap=2 で指定
-const STAGE_WINS=[[1,1],[2,2],[3,2]];                                      // data/stage_wins_lap1.csv: 1周目のステージ条件(3ゲームのうち必要な和了の回数)。表にないステージは最後の行
+const STAGE_WINS=CFG.STAGE_WINS;                                     // data/stage_wins_lap1.csv: 1周目のステージ条件(3ゲームのうち必要な和了の回数)。表にないステージは最後の行
 function winsNeeded(st){let n=STAGE_WINS[0][1];for(const [a,b] of STAGE_WINS)if(st>=a)n=b;return n;}
 const lvOf=_stage=>kenLap(LAP);   // 研究♡は周回数で決まる。ステージ番号では変わらない(20261008-2250)
 const G6ROW=new Map();

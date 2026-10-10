@@ -27,6 +27,20 @@ data = {
            for r in csv.DictReader(open(os.path.join(ROOT, "data", "word_tags_v1.csv"), encoding="utf-8-sig"))},
     "KZ": sorted(r["name"] for r in rd("yaku_class.csv") if r["class"].startswith("飾り")),
 }
+# 設定ファイル(data/*.csv)を試作に渡す(20261010-1925): 解禁表・周回と研究♡・しきい値・1周目のステージ条件・見本の仕込み・リナの台詞の頻度・句の上限/倍率
+def _csv(n): return list(csv.DictReader(open(os.path.join(ROOT, "data", n), encoding="utf-8-sig")))
+_sc = {r["key"]: r["value"].strip() for r in _csv("score_config.csv")}
+_ss = {r["key"]: r["value"].strip() for r in _csv("sample_seed.csv")}
+_pc = {r["key"]: r["value"].strip() for r in _csv("phrase_config.csv")}
+data["CFG"] = {
+    "UNLOCK": {r["key"]: [int(r["lv0"]), int(r["lv1"]), int(r["lv2"])] for r in _csv("score_unlock.csv")},
+    "LAP_KEN": sorted([int(r["lap"]), int(r["ken"])] for r in _csv("lap_config.csv")),
+    "KEN_MODE": _sc["KEN_MODE"], "KEN_CONST": int(_sc["KEN_CONST"]),
+    "STAGE_WINS": sorted([int(r["stage"]), int(r["wins_needed"])] for r in _csv("stage_wins_lap1.csv")),
+    "SAMPLE": {"on": _ss["SAMPLE_ENABLE"] == "1", "words": _ss["SAMPLE_WORDS"].split("|"), "lapMax": int(_ss["SAMPLE_LAP_MAX"])},
+    "LINA_EVERY": int({r["key"]: r["value"] for r in _csv("lina_config.csv")}["LINA_LINE_EVERY"]),
+    "PHRASE_CAP": int(_pc["PHRASE_CAP_PER_HAND"]), "PHRASE_MULT": (float(_pc["PHRASE_MULT"]) if _pc.get("PHRASE_MULT") else None),
+}
 # 山の牌の順(プロトタイプの C は、牌の字→枚数。ぉ゛・×2 を含む)
 p = os.path.join(ROOT, "prototype", "hiragana_tap_prototype.html")
 s = open(p, encoding="utf-8").read()
@@ -129,6 +143,8 @@ import proto_patch4
 s = proto_patch4.apply(s)
 import proto_patch5
 s = proto_patch5.apply(s)
+import proto_patch6
+s = proto_patch6.apply(s)
 # ---- 一周版100語(20261010-1925 作業2): 語 data/words_ichishuu100.csv・山156枚・雀頭27。365語版は prototype/hiragana_tap_prototype_365.html に残す(従来の試験はこちら) ----
 open(os.path.join(ROOT, "prototype", "hiragana_tap_prototype_365.html"), "w", encoding="utf-8").write(s)
 sys.path.insert(0, os.path.join(ROOT, "ichishuu"))
