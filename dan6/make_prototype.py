@@ -127,5 +127,22 @@ import proto_patch3
 s = proto_patch3.apply(s)
 import proto_patch4
 s = proto_patch4.apply(s)
+# ---- 一周版100語(20261010-1925 作業2): 語 data/words_ichishuu100.csv・山156枚・雀頭27。365語版は prototype/hiragana_tap_prototype_365.html に残す(従来の試験はこちら) ----
+open(os.path.join(ROOT, "prototype", "hiragana_tap_prototype_365.html"), "w", encoding="utf-8").write(s)
+sys.path.insert(0, os.path.join(ROOT, "ichishuu"))
+import sim_ichishuu as SI
+W100, _pairs, _usage = SI.load(); _v = SI.verify(W100, _pairs, _usage, rd("heads.csv"))
+_names = {w["word"] for w in W100}
+_wi = [i for i, w in enumerate(W) if set(w["word"].split("・")) & _names]
+_hn = {h["head"] for h in _v["heads"]}; _hi = [i for i, h in enumerate(H) if h["head"] in _hn]
+assert len(_wi) == 100 and len(_hi) == 27 and _v["wall"] == 156, (len(_wi), len(_hi), _v["wall"])
+data100 = dict(data, W=[data["W"][i] for i in _wi], A=[data["A"][i] for i in _wi], H=[data["H"][i] for i in _hi], HA=[data["HA"][i] for i in _hi],
+               C=dict(sorted(_v["copies"].items(), key=lambda kv: kv[0])))
+i = s.index("const DATA=") + len("const DATA="); _, end = json.JSONDecoder().raw_decode(s[i:])
+s = s[:i] + json.dumps(data100, ensure_ascii=False) + s[i + end:]
+_old = 'if(i===undefined)throw new Error("辞書にない語: "+tok);a[i]=1;'
+assert _old in s
+s = s.replace(_old, 'if(i!==undefined)a[i]=1;')   # 一周版100語: 役の語の集合のうち、100語にない語は外す(yaku14.py はフル辞書で数えるが、100語の手では同じ結果)
+s = s.replace(f"dan6 の語{len(W)}・雀頭{len(H)}・山{sum(data['C'].values())}枚", f"一周版の語{len(_wi)}・雀頭{len(_hi)}・山{sum(data100['C'].values())}枚(365語版は _365.html)")
 open(p, "w", encoding="utf-8").write(s)
-print("試作HTMLを更新: 語", len(W), "役", len(Y), "合体", len(M), "山", sum(data["C"].values()), "枚")
+print("試作HTMLを更新: 365語版 語", len(W), "山", sum(data["C"].values()), "枚 / 100語版 語", len(_wi), "雀頭", len(_hi), "山", sum(data100["C"].values()), "枚 / 役", len(Y), "合体", len(M))

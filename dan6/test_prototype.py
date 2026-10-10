@@ -5,7 +5,7 @@ import os, sys, re
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.join(HERE, "..")
 sys.path.insert(0, os.path.join(ROOT, "game"))
 from pw import sync_playwright, launch
-URL = "file://" + os.path.abspath(os.path.join(ROOT, "prototype", "hiragana_tap_prototype.html"))
+URL = "file://" + os.path.abspath(os.path.join(ROOT, "prototype", os.environ.get("PROTO", "hiragana_tap_prototype_365.html")))   # 従来の試験は365語版。一周版100語は PROTO=hiragana_tap_prototype.html
 res, errs = [], []
 SHOTS = os.path.join(ROOT, "results_dan6", "shots"); os.makedirs(SHOTS, exist_ok=True)
 def ok(n, c, extra=""):
@@ -55,7 +55,7 @@ with sync_playwright() as p:
     ok("搭子の候補に、同じ牌の組(エロ+お と エロ+ぉ゛ など)の重複がない", r["n"] > 0 and r["dupKeys"] == 0, str(r["top"]))
     ok("搭子の待ち牌が、つ・っ/お・ぉ゛ で重複しない。残り枚数は、待ち牌(互換を含む)の山の枚数と一致し、多い順", r["dupWaits"] == 0 and r["remainOk"] and r["sorted"])
     # ---- dan6 の追加 ----
-    html = open(os.path.join(ROOT, "prototype", "hiragana_tap_prototype.html"), encoding="utf-8").read()
+    html = open(os.path.join(ROOT, "prototype", os.environ.get("PROTO", "hiragana_tap_prototype_365.html")), encoding="utf-8").read()
     ok("はじめての語ボーナスが、どこにもない(計算・表示・演出カード・保存データ)", "newWords" not in html and "はじめての語" not in html and "NEW</span>" not in html)
     body = "\n".join(l for l in html.split("\n") if not l.startswith("const DATA="))
     ok("画面・演出・図鑑・コメントに「翻」の文字が残っていない(検索)", "翻" not in body and "翻" not in html, "")

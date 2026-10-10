@@ -54,32 +54,39 @@ with sync_playwright() as p:
     pg.evaluate(SETUP, [["ん"], W13 + ["う"]])
     r = finish()
     ok("c. 何も組まずに14牌目 → 自動で組む(kept=0)。組み替えの表示は出ない", r["won"] and r["kept"] == 0 and r["user"] == 0 and not r["rearr"] and "組み替えました" not in r["html"], str(r)[:200])
-    # d. 分け方が複数ある手: 自分で組んだ形(解読点が最大でない分け方の面子2つ)が、そのまま確定する
-    H13 = ['デカ', 'ぱ', 'い', 'ぬれ', '媚び', '♡', 'け', 'つ', '穴', 'エロ', '舐め', '♡', 'ま']
+    # d. 分け方が複数ある手: 自分で組んだ形(解読点が最大でない分け方の面子2つ)が、そのまま確定する。手は、この辞書から探す(語の集合に依存しない)
     pg.evaluate("()=>{LAP=3;}")   # 3周目(研究♡2)にして、分け方ごとの解読点に差が出るようにする(1周目は500固定で、最大かどうかが決まらない)
-    pg.evaluate(SETUP, [["ん"], H13])
-    plan = pg.evaluate("""()=>{ const labels=flat().map(t=>t.label).concat(['ん']),parts=allPartitions(DICT,labels,2000),lv=lvOf(STG.stage),oho=0;
-      const pts=parts.map(p=>{const ws=p.melds.map(m=>WI.get(m.word.name)),hd=HI.get(p.head.name),sc=scoreHand(ws,hd,oho,true);return g6score(ws.map(w=>DICT.words[w].name),DICT.heads[hd].name,lv,sc.yin).points;});
-      const mx=Math.max(...pts);
-      // 13牌(ん を除く)の中に完全に含まれる面子2つを持つ、最大でない分け方
-      let pick=null;for(let i=0;i<parts.length&&!pick;i++){if(pts[i]===mx)continue;const ms=parts[i].melds.filter(m=>!m.assigned.includes('ん')).slice(0,2);if(ms.length===2)pick={i,melds:ms.map(m=>m.assigned.slice()),names:ms.map(m=>m.word.name),n:parts.length,pts:pts[i],max:mx};}
-      return pick; }""")
-    ok("d. 分け方が複数ある手(267通り程度)で、解読点が最大でない分け方の面子2つを選べた", plan is not None and plan["n"] > 10 and plan["pts"] < plan["max"], str(plan)[:200])
+    plan = pg.evaluate("""()=>{ let seed=12345;const rnd=()=>{seed=(seed*1103515245+12345)%2147483648;return seed/2147483648;};const lv=lvOf(STG.stage);
+      for(let k=0;k<4000;k++){
+        const ws=[];while(ws.length<4){const w=DICT.words[Math.floor(rnd()*DICT.words.length)];if(!ws.includes(w))ws.push(w);}
+        const hd=DICT.heads[Math.floor(rnd()*DICT.heads.length)];let labels=[];ws.forEach(w=>labels.push(...w.tiles));labels.push(...hd.tiles);
+        const tsumo=labels[labels.length-1];const parts=allPartitions(DICT,labels,2000);if(parts.length<3)continue;
+        const oho=labels.filter(l=>l==='ぉ゛').length;
+        const pts=parts.map(p=>{const w2=p.melds.map(m=>WI.get(m.word.name)),h2=HI.get(p.head.name),sc=scoreHand(w2,h2,oho,true);return g6score(w2.map(w=>DICT.words[w].name),DICT.heads[h2].name,lv,sc.yin).points;});
+        const mx=Math.max(...pts);
+        for(let i=0;i<parts.length;i++){if(pts[i]===mx)continue;
+          const ms=parts[i].melds.filter(m=>m.assigned.every(l=>nz(l)!==nz(tsumo)));   // 和了牌(最後の牌)を含まない面子
+          if(ms.length>=2)return {hand:labels,tsumo,melds:ms.slice(0,2).map(m=>m.assigned.slice()),names:ms.slice(0,2).map(m=>m.word.name),n:parts.length,pts:pts[i],max:mx};}
+      }
+      return null; }""")
+    ok("d. 分け方が複数ある手で、解読点が最大でない分け方の面子2つを選べた", plan is not None and plan["n"] >= 3 and plan["pts"] < plan["max"], str(plan)[:200])
+    H13 = plan["hand"][:-1]
+    pg.evaluate(SETUP, [[plan["tsumo"]], H13])
     for m in plan["melds"]: make("meld", m)
     r = finish(); pg.screenshot(path=os.path.join(SHOTS, "hold_d.png"))
     got = pg.evaluate("()=>won&&won.melds") or []
     ok("d. 結果: 自分で組んだ2つの面子が、そのまま残る(最大の分け方に組み替えない)。kept=2・組み替えなし", r["won"] and r["kept"] == 2 and not r["rearr"] and all(any(nm == g or nm.split("・")[0] == g.split("・")[0] for g in got) for nm in plan["names"]), str(r)[:200] + str(plan["names"]) + str(got))
     # e. 組んだ形を壊さないとアガれない場合だけ、組み替える(表示あり)
-    pg.evaluate(SETUP, [["ん"], H13])
-    bad = pg.evaluate("""()=>{ const labels=flat().map(t=>t.label).concat(['ん']),parts=allPartitions(DICT,labels,2000),inAny=new Set();parts.forEach(p=>p.melds.forEach(m=>inAny.add(m.word.name)));
+    pg.evaluate(SETUP, [[plan["tsumo"]], H13])
+    bad = pg.evaluate("""(ts)=>{ const labels=flat().map(t=>t.label).concat([ts]),parts=allPartitions(DICT,labels,2000),inAny=new Set();parts.forEach(p=>p.melds.forEach(m=>inAny.add(m.word.name)));
       const L=flat().map(t=>t.label);
       for(let a=0;a<L.length;a++)for(let b=a+1;b<L.length;b++)for(let c=b+1;c<L.length;c++){const tr=[L[a],L[b],L[c]],r=findWord(DICT,tr,new Set());if(r&&!inAny.has(r.word.name))return {labels:tr,name:r.word.name};}
-      return null; }""")
+      return null; }""", plan["tsumo"])
     ok("e. どの分け方にも入らない語(組むと、アガれなくなる面子)が、この手にある", bad is not None, str(bad))
     if bad:
         make("meld", bad["labels"])
         r = finish(); pg.screenshot(path=os.path.join(SHOTS, "hold_e.png"))
-        ok("e. 結果: 組んだ形を壊さないとアガれないので組み替える。「組み替えました」と、解いた形と新しい語を出す(kept<user)", r["won"] and r["user"] == 1 and r["kept"] == 0 and "組み替えました" in r["html"] and r["rearr"] and "いけ" in r["rearr"], r["rearr"])
+        ok("e. 結果: 組んだ形を壊さないとアガれないので組み替える。「組み替えました」と、解いた形と新しい語を出す(kept<user)", r["won"] and r["user"] == 1 and r["kept"] == 0 and "組み替えました" in r["html"] and r["rearr"] and r["rearr"].startswith("面子「"), r["rearr"])
     ok("ページエラーがない", not errs, str(errs[:1]))
     b.close()
 print("すべてOK" if all(res) else "失敗"); sys.exit(0 if all(res) else 1)
