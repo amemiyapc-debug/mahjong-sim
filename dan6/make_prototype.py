@@ -125,5 +125,7 @@ import proto_patch2
 s = proto_patch2.apply(s)
 import proto_patch3
 s = proto_patch3.apply(s)
+import proto_patch4
+s = proto_patch4.apply(s)
 open(p, "w", encoding="utf-8").write(s)
 print("試作HTMLを更新: 語", len(W), "役", len(Y), "合体", len(M), "山", sum(data["C"].values()), "枚")

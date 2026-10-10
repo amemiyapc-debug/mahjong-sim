@@ -768,51 +768,68 @@ function sortHand(){
   items=[...melds,...heads,...dazis,...loose,...(ts?[ts]:[])];sel=[];msg="整理しました。";render();
 }
 function ungroupAll(){if(won||over)return;const out=[];items.forEach(it=>{if(it.k==="tile")out.push(it);else it.tiles.forEach(t=>out.push({k:"tile",tile:t}));});items=out;sel=[];msg="すべてほどきました。";render();}
-let lastUserN=0;
+let lastUserN=0,lastRearr="";
+function groupDesc(g){return g.kind==="dazi"?"搭子「"+g.tiles.map(t=>t.label).join("+")+"」":(g.kind==="head"?"雀頭":"面子")+"「"+(g.text||g.name)+"」";}
 function checkWin(){
   if(choice||skipMode)return;
   const all=flat();if(all.length!==14||won)return;
-  const melds=items.filter(i=>i.k==="group"&&i.kind==="meld");
-  const headG=items.find(i=>i.k==="group"&&i.kind==="head")||null;
+  const ugs=items.filter(i=>i.k==="group");      // 自分で組んだ形(面子・雀頭・搭子)
   const labels=all.map(t=>t.label),oho=labels.filter(l=>l==="ぉ゛").length;
   const parts=allPartitions(DICT,labels,2000);
   if(!parts.length)return;
   const lv=lvOf(STG.stage),key=(n,l)=>n+"|"+l.slice().sort().join("");
   const info=parts.map(p=>{const ws=p.melds.map(m=>WI.get(m.word.name)),hd=HI.get(p.head.name),sc=scoreHand(ws,hd,oho,true);
     const gs=g6score(ws.map(w=>DICT.words[w].name),DICT.heads[hd].name,lv,sc.yin);
-    return {p,pts:gs.points,yin:sc.yin,mk:p.melds.map(m=>key(m.word.name,m.assigned)),hk:key(p.head.name,p.headAssigned)};});
-  // 自分で組んだ面子・雀頭を、できるだけ多く残したまま、アガリ形にする。残りの牌は、解読点が最大になる分け方で自動で組む。だめなら、組み替える
-  const subsets=[];for(let m=0;m<(1<<melds.length);m++)subsets.push(melds.filter((_,i)=>m&(1<<i)));
-  subsets.sort((x,y)=>y.length-x.length);
+    return {p,pts:gs.points,yin:sc.yin,mk:p.melds.map(m=>key(m.word.name,m.assigned)),mm:p.melds.map(m=>m.assigned.map(nz)),hk:key(p.head.name,p.headAssigned),hm:p.headAssigned.map(nz).slice().sort().join("")};});
+  // 形 g を、分け方 x のどの構成要素(面子の番号。雀頭は -1)に割り当てるか。1つの構成要素に割り当てられる形は1つだけ
+  function assign(sub,x){
+    const used=new Set(),res=[];
+    const rec=i=>{
+      if(i===sub.length)return true;const g=sub[i],opts=[];
+      if(g.kind==="meld"){const k=key(g.name,g.tiles.map(t=>t.label));x.mk.forEach((m,j)=>{if(m===k)opts.push(j);});}
+      else if(g.kind==="head"){if(x.hk===key(g.name,g.tiles.map(t=>t.label)))opts.push(-1);}
+      else{const gk=g.tiles.map(t=>nz(t.label));
+        x.mm.forEach((arr,j)=>{const rest=arr.slice();let okk=true;for(const l of gk){const q=rest.indexOf(l);if(q<0){okk=false;break;}rest.splice(q,1);}if(okk)opts.push(j);});   // 搭子 → 面子(和了牌で完成)
+        if(x.hm===gk.slice().sort().join(""))opts.push(-1);}                                                                                   // 搭子 → そのまま雀頭
+      for(const j of opts){if(used.has(j))continue;used.add(j);res[i]=j;if(rec(i+1))return true;used.delete(j);}
+      return false;};
+    return rec(0)?res.slice():null;}
+  function build(sub,x,as){
+    const p=x.p,fixed=new Set();sub.forEach(s=>s.tiles.forEach(t=>fixed.add(t.id)));
+    const pool=all.filter(t=>!fixed.has(t.id));
+    const take=lab=>{let i=pool.findIndex(t=>t.label===lab);if(i<0)i=pool.findIndex(t=>nz(t.label)===nz(lab));return i<0?null:pool.splice(i,1)[0];};
+    const g=[];
+    for(let j=0;j<p.melds.length;j++){const m=p.melds[j],gi=sub.findIndex((s,i)=>as[i]===j);
+      if(gi>=0&&sub[gi].kind==="meld"){g.push(sub[gi]);continue;}
+      let tiles;
+      if(gi>=0){const s=sub[gi],rest=m.assigned.slice();s.tiles.forEach(t=>{const q=rest.findIndex(l=>nz(l)===nz(t.label));if(q>=0)rest.splice(q,1);});
+        tiles=orderTiles(s.tiles.concat(rest.map(take)),m.assigned);}
+      else tiles=m.assigned.map(take);
+      if(tiles.some(t=>!t))return null;
+      g.push({k:"group",kind:"meld",tiles,text:readingOf(m.word,m.assigned),name:m.word.name});}
+    const hi=sub.findIndex((s,i)=>as[i]===-1);
+    if(hi>=0)g.push(sub[hi].kind==="head"?sub[hi]:{k:"group",kind:"head",tiles:sub[hi].tiles,text:p.head.name,name:p.head.name});
+    else{const tiles=p.headAssigned.map(take);if(tiles.some(t=>!t))return null;g.push({k:"group",kind:"head",tiles,text:p.head.name,name:p.head.name});}
+    return g.reduce((n,x)=>n+x.tiles.length,0)===14?g:null;}
+  // 残す形の数が多い順に試す(同じ数なら、組み方の違う全部の組を試す)。残す形が決まったら、解読点が最大になる分け方を使う
+  const subsets=[];for(let m=0;m<(1<<ugs.length);m++){const sub=ugs.filter((_,i)=>m&(1<<i));subsets.push(sub);}
+  subsets.sort((a,b)=>b.length-a.length);
   let hit=null;
-  outer:for(const sub of subsets)for(const keepHead of(headG?[true,false]:[false])){
-    const need=sub.map(g=>key(g.name,g.tiles.map(t=>t.label))),hk=keepHead?key(headG.name,headG.tiles.map(t=>t.label)):null;
+  for(const sub of subsets){
     let best=null;
-    for(const x of info){
-      if(hk&&x.hk!==hk)continue;
-      const pool=x.mk.slice();let okc=true;
-      for(const k of need){const i=pool.indexOf(k);if(i<0){okc=false;break;}pool.splice(i,1);}
-      if(!okc)continue;
-      if(!best||x.pts>best.pts||(x.pts===best.pts&&x.yin>best.yin))best=x;
-    }
-    if(best){hit={sub,keepHead,x:best};break outer;}
+    for(const x of info){const as=assign(sub,x);if(!as)continue;if(!best||x.pts>best.x.pts||(x.pts===best.x.pts&&x.yin>best.x.yin))best={x,as};}
+    if(best){const g=build(sub,best.x,best.as);if(g){hit={sub,g};break;}}
   }
   if(!hit)return;
-  const {sub,keepHead,x}=hit,p=x.p,g=[];
-  sub.forEach(s=>g.push(s));
-  const fixed=new Set();sub.forEach(s=>s.tiles.forEach(t=>fixed.add(t.id)));if(keepHead)headG.tiles.forEach(t=>fixed.add(t.id));
-  const pool=all.filter(t=>!fixed.has(t.id)),take=lab=>pool.splice(pool.findIndex(t=>t.label===lab),1)[0];
-  const left=x.mk.slice();sub.forEach(s=>{left.splice(left.indexOf(key(s.name,s.tiles.map(t=>t.label))),1);});
-  p.melds.forEach(m=>{const k=key(m.word.name,m.assigned),i=left.indexOf(k);if(i<0)return;left.splice(i,1);
-    g.push({k:"group",kind:"meld",tiles:m.assigned.map(take),text:readingOf(m.word,m.assigned),name:m.word.name});});
-  if(keepHead)g.push(headG);else g.push({k:"group",kind:"head",tiles:p.headAssigned.map(take),text:p.head.name,name:p.head.name});
-  const keptN=sub.length+(keepHead?1:0);lastUserN=melds.length+(headG?1:0);
+  const {sub,g}=hit;const keptN=sub.length;lastUserN=ugs.length;
+  const broken=ugs.filter(u=>!sub.includes(u)),made=g.filter(x=>!sub.includes(x));
+  lastRearr=broken.length?broken.map(groupDesc).join("・")+" を解いて、"+made.map(x=>groupDesc(x)).join("・")+" に組み替えました":"";
   if(!practice&&STG.skips>0&&draws<LMAX){items=g;sel=[];tsumoId=null;choice=true;pendingWin={g,keptN};msg="";render();return;}   // 見送りを選べる
   finalizeWin(g,keptN);
 }
 function finalizeWin(g,keptN){
   items=g;sel=[];tsumoId=null;choice=false;pendingWin=null;
-  won={melds:g.filter(x=>x.kind==="meld").map(x=>x.text),head:g.find(x=>x.kind==="head").text,kept:keptN,total:5,user:lastUserN};won.data=null;const wcur=won;if(DEFER){setTimeout(()=>{if(won===wcur){won.data=evalWin();render();renderIngo();refreshStar();playShow().catch(()=>{showRunning=false;});}},30);}else won.data=evalWin();
+  won={melds:g.filter(x=>x.kind==="meld").map(x=>x.text),head:g.find(x=>x.kind==="head").text,kept:keptN,total:5,user:lastUserN,rearr:lastRearr};won.data=null;const wcur=won;if(DEFER){setTimeout(()=>{if(won===wcur){won.data=evalWin();render();renderIngo();refreshStar();playShow().catch(()=>{showRunning=false;});}},30);}else won.data=evalWin();
   msg="";render();
 }
 // ===== 語呂: 役割(スロット)の順 → 前置き・感情・キス・部位・行為・擬音・絶頂・喘ぎ声。同じ役割の中だけ、しりとりが最大になる順に =====
@@ -892,7 +909,7 @@ function winHTML(){
   if(d.firstIn)s+=`<div class="hint" style="margin-top:4px"><b>淫</b>とは: 名前つき役の数字です。句ボーナスに足されて、解読点が増えます(例: +3淫なら、句ボーナスが +3)。</div>`;
   if(d.ura>0)s+=`<div class="sc">裏読みボーナス <span class="han">+${d.ura}淫</span> <small>(同じ14牌は「${d.best.p.melds.map(m=>readingOf(m.word,m.assigned).split("・")[0]).join("・")}+${d.best.p.head.name}」とも読める)</small></div>`;
   if(d.st)s+=`<div class="sc">ステージ: ${d.st}</div>`;
-  if(won.user>won.kept)s+=`<div class="hint rearr" style="margin-top:6px"><b>組み替えました</b>。自分で組んだ ${won.user} 個のうち ${won.kept} 個はそのまま使い、残りは、アガリになる形に組み替えました。</div>`;
+  if(won.user>won.kept)s+=`<div class="hint rearr" style="margin-top:6px"><b>組み替えました</b>。自分で組んだ ${won.user} 個のうち ${won.kept} 個はそのまま。${won.rearr}。</div>`;
   else if(won.kept<5)s+=`<div class="hint" style="margin-top:6px">自分で組んだ ${won.kept} 個はそのまま。残りの牌は、解読点が最大になる分け方で自動で組みました。</div>`;
   if(hint&&d.near.length)s+=`<div class="miss" style="margin-top:8px"><b>惜しかった役</b>(1語を替えれば成立)<br>${d.near.slice(0,5).map(e=>e.name+"("+e.han+"淫) ← 「"+DICT.words[e.ex[0].from].name+"」を「"+DICT.words[e.ex[0].to].name+"」に").join("<br>")}</div>`;
   s+=`<div class="sh-btns" style="margin-top:8px"><button class="b" id="replay">演出をもう一度</button></div>`;
@@ -929,7 +946,7 @@ function flashScreen(){const f=$$("shflash");f.classList.remove("go");void f.off
 function shakeBox(){const b=$$("shbox");b.classList.remove("shake");void b.offsetWidth;b.classList.add("shake");}
 function confetti(n,items){if(skipShow)return;const L=items||["♡","✦","ん","ち","ま","♡","★","あ"],C=["#ff6ba0","#ffd43b","#69db7c","#4dabf7","#da77f2","#fff"];for(let i=0;i<n;i++){const s=document.createElement("span");s.className="cf";s.textContent=L[i%L.length];s.style.left=Math.random()*100+"vw";s.style.fontSize=(14+Math.random()*18)+"px";s.style.color=C[i%C.length];s.style.animationDuration=(1.8+Math.random()*1.6)+"s";s.style.animationDelay=(Math.random()*.5)+"s";document.body.appendChild(s);setTimeout(()=>s.remove(),4200);}}
 const rar=h=>h>=5?"r4":h>=3?"r3":h>=2?"r2":"r1";
-/* dan6:show *//* dan6:c */
+/* dan6:show *//* dan6:c *//* dan6:d */
 // ===== アガリ演出(20261007-1345・1350): タイプライター(4文字/秒・金文字・石碑)→ ジングル → パワー溜め → 解読点リール → 最終(ガチャ風・碑文に刻む) =====
 let STONE_URL=null;
 function stoneURL(){
